@@ -1,75 +1,54 @@
 #lang racket
 
-(require br/parser/tools/lex)
+(require br-parser-tools/lex)
+(require binaryio)
+(require file/sha1)
 
-(provide tokenize)
+(require brag/support)
+
+(provide make-tokenizer
+         tokenize-all)
 
 (define-lex-abbrev identifier
-  (: alphabetic
-     (:* (:or alphabetic numeric))))
+  (:: (:or alphabetic "_")
+     (:* (:or alphabetic numeric "_"))))
 
-(define (c-lexer next)
+(define-lex-abbrev hex (:or numeric "a" "b" "c" "d" "e" "f" "A" "B" "C" "D" "E" "F"))
+
+(define (operator x) (token x x))
+
+(define c-lexer
   (lexer-src-pos
-   [(eof)      eof       ]
+   [(eof)               eof]
    ; Syntax regions
-   [whitespace          (token 'WHITESPACE lexeme #:skip? #t)]
+   [(:+ whitespace)     (token 'WHITESPACE lexeme #:skip? #t)]
    [(from/to "//" "\n") (token 'SCOMMENT   lexeme #:skip? #t)]
    [(from/to "/*" "*/") (token 'MCOMMENT   lexeme #:skip? #t)]
    ; Constants
-   [(: "0x" (+ numeric)) (token 'INTEGER (bytes->integer (hex-string->bytes lexeme) #f))]
-   [(+ numeric)          (token 'INTEGER (string->integer lexeme))]
+   [(:: "0x" (:+ hex) "ULL") (token 'INTEGER (string->number (substring lexeme 2 (- (string-length lexeme) 3))))]
+   [(:: "0x" (:+ hex))       (token 'INTEGER (string->number (substring lexeme 2) 16))]
+   [(:: (:+ numeric)  "ULL") (token 'INTEGER (string->number (substring lexeme 0 (- (string-length lexeme) 3))))]
+   [(:+ numeric)             (token 'INTEGER (string->number lexeme))]
+   [(:: "'" (char-complement "'") "'") (token 'CHAR (substring lexeme 1 2))]
+   ["'\\''"                  (token 'CHAR "'")]
+   [(:: "\""                 (:* (char-complement "\"")) "\"") (token 'STRING lexeme)]
    ; Punctuation
-   ["{"        (token 'LCURLY    )]
-   ["}"        (token 'RCURLY    )]
-   ["("        (token 'LPAREN    )]
-   [")"        (token 'RPAREN    )]
-   ["["        (token 'LSQUARE   )]
-   ["]"        (token 'RSQUARE   )]
-   [";"        (token 'SEMI      )]
-   [","        (token 'COMMA     )]
-   ["."        (token 'DOT       )]
-   [":"        (token 'COLON     )]
-   ["'"        (token 'SQUOTE    )]
-   ["\""       (token 'DQUOTE    )]
-   ; Operators
-   ["<<="      (token 'LSH-ASSIGN )]
-   [">>="      (token 'RSH-ASSIGN )]
-   ["+="       (token 'ADD-ASSIGN )]
-   ["-="       (token 'SUB-ASSIGN )]
-   ["*="       (token 'MUL-ASSIGN )]
-   ["/="       (token 'DIV-ASSIGN )]
-   ["%="       (token 'MOD-ASSIGN )]
-   ["||="      (token 'LOR-ASSIGN )]
-   ["|="       (token 'BOR-ASSIGN )]
-   ["^="       (token 'XOR-ASSIGN )]
-   ["&&="      (token 'LAND-ASSIGN)]
-   ["&="       (token 'BAND-ASSIGN)]
-   ["~="       (token 'NEG-ASSIGN )]
-   ["++"       (token 'INC        )]
-   ["--"       (token 'DEC        )]
-   
-   ["<<"       (token 'LSH       )]
-   [">>"       (token 'RSH       )]
-   ["+"        (token 'ADD       )]
-   ["-"        (token 'SUB       )]
-   ["*"        (token 'MUL       )]
-   ["/"        (token 'DIV       )]
-   ["%"        (token 'MOD       )]
-   ["||"       (token 'LOR       )]
-   ["|"        (token 'BOR       )]
-   ["^"        (token 'XOR       )]
-   ["&&"       (token 'LAND      )]
-   ["&"        (token 'BAND      )]
-   ["~"        (token 'NEG       )]
-
-   ["!="       (token 'NEQ       )]
-   ["!"        (token 'NOT       )]
-   ["<="       (token 'LE        )]
-   ["<"        (token 'LT        )]
-   [">="       (token 'GE        )]
-   [">"        (token 'GT        )]
-   ["=="       (token 'EQ        )]
-   ["="        (token 'ASSIGN    )]
+   ["{"  (operator 'LCURLY )]
+   ["}"  (operator 'RCURLY )]
+   ["("  (operator 'LPAREN )]
+   [")"  (operator 'RPAREN )]
+   ["["  (operator 'LSQUARE)]
+   ["]"  (operator 'RSQUARE)]
+   [";"  (operator 'SEMI   )]
+   [","  (operator 'COMMA  )]
+   [":"  (operator 'COLON  )]
+   ["'"  (operator 'SQUOTE )]
+   ["\"" (operator 'DQUOTE )]
+   ; Operators 
+   [(:or "?" "<<=" ">>=" "+=" "-=" "*=" "/=" "%=" "||="
+         "|=" "^=" "&&=" "&=" "~=" "++" "--" "<<" ">>" "+"
+         "-"  "*"  "/"   "%"  "||" "|"  "^"  "&&" "&"  "~"
+         "!=" "!"  "<="  "<"  ">=" ">"  "==" "=" "->" ".") lexeme]
    
    ; Keywords
    ["typedef"  (token 'TYPEDEF )]
@@ -92,6 +71,7 @@
    ["goto"     (token 'GOTO    )]
    ["extern"   (token 'EXTERN  )]
    ["while"    (token 'WHILE   )]
+   ["do"       (token 'DO      )]
    ["for"      (token 'FOR     )]
    ["static"   (token 'STATIC  )]
    [identifier (token 'IDENTIFIER lexeme)]
@@ -106,7 +86,10 @@
 (define (tokenize-all ip)
   (define tokenizer (make-tokenizer ip))
   (define (loop)
-    (match (tokenizer)
-      [#f null]
-      [x  (cons x (loop))]))
+    (define tok (tokenizer))
+    (match tok
+      [(? eof-object?) null]
+      [(struct position-token ((? eof-object?) start end)) null]
+      [_ (cons tok (loop))])
+    )
   (loop))

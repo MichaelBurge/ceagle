@@ -1,4 +1,14 @@
+#lang reader "reader.rkt"
+
+// BEGIN C++ COMPATIBILITY
 typedef unsigned int uint64_t;
+typedef unsigned int bool;
+
+const bool false = 0;
+const bool true = 1;
+
+const int NEGATIVE_INFINITY = -1000000000;
+// END C++ COMPATIBILITY
 
 // bb is 'bitboard'
 typedef struct gamestate {
@@ -20,10 +30,10 @@ typedef struct gamestate {
   bool is_white;
 } gamestate;
 
-struct move {
+typedef struct move {
   int from;
   int to;
-};
+} move;
 
 typedef gamestate iterator;
 typedef int piece;
@@ -44,7 +54,7 @@ const int VALUE_ROOK   = 500;
 const int VALUE_QUEEN  = 900;
 const int VALUE_AVAILABLE_MOVE = 5; // Points for each move available
 const int VALUE_CHECKMATE = -1000000; 
-const int VALUE_NEGAMAX_START = 0x80000000;
+const int VALUE_NEGAMAX_START = NEGATIVE_INFINITY;
 const int VALUE_CENTER = 10; // Points for holding the center
 const int VALUE_ATTACK = 20; // Points for being able to attack enemy pieces.
 
