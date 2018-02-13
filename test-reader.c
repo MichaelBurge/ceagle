@@ -1,5 +1,6 @@
 #lang ceagle
 
 int main() {
-  return 0;
+  __builtin_set_test_result(120);
+  return 120;
 }

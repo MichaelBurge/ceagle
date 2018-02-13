@@ -23,6 +23,7 @@
 (define-type c-modifier (U 'extern 'static))
 
 (struct c-label       ([ name : Symbol ]) #:transparent)
+(struct c-expression-statement ([ exp : c-expression ]) #:transparent)
 (struct c-switch-case ([ expected : c-expression ] [ body : c-statement ]) #:transparent)
 (struct c-switch      ([ actual : c-expression ] [ cs : c-switch-cases] [ default : c-statement ]) #:transparent)
 (struct c-if  ([ pred : c-expression ] [ consequent : c-statement ] [ alternative : c-statement ]) #:transparent)
@@ -38,7 +39,7 @@
 (struct c-sigvar    ([ name : Symbol ] [ type : c-type   ]) #:transparent)
 (struct c-signature ([ ret  : c-type ] [ args : c-sigvars ]) #:transparent)
 (define-type c-statement (U c-label
-                            c-expression
+                            c-expression-statement
                             c-switch
                             c-if
                             c-for

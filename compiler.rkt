@@ -39,7 +39,12 @@
     (pyr-begin (map compile-declaration x-decls)))
   (define call-main
     (c-function-call (c-variable 'main) (list)))
-  (pyr-begin (list decls (compile-statement call-main))))
+  (pyr-begin
+   (listof
+    (pyr-macro-application 'include (list (pyr-variable 'ceagle)
+                                          (pyr-const "builtins.pmd")))
+    decls
+    (compile-expression call-main))))
 
 (: compile-declaration (-> c-declaration Pyramid))
 (define (compile-declaration x)
@@ -85,19 +90,19 @@
 (: compile-statement (-> c-statement Pyramid))
 (define (compile-statement x)
   (match x
-    [(? c-label?)       (compile-label       x)]
-    [(? c-expression?)  (compile-expression  x)]
-    [(? c-switch?)      (compile-switch      x)]
-    [(? c-if?)          (compile-if          x)]
-    [(? c-for?)         (compile-for         x)]
-    [(? c-while?)       (compile-while       x)]
-    [(? c-do-while?)    (compile-do-while    x)]
-    [(? c-goto?)        (compile-goto        x)]
-    [(? c-block?)       (compile-block       x)]
-    [(? c-return?)      (compile-return      x)]
-    [(? c-break?)       (compile-break       x)]
-    [(? c-continue?)    (compile-continue    x)]
-    [(? c-declaration?) (compile-declaration x)]
+    [(? c-label?)                (compile-label       x)]
+    [(? c-expression-statement?) (compile-expression  (c-expression-statement-exp x))]
+    [(? c-switch?)               (compile-switch      x)]
+    [(? c-if?)                   (compile-if          x)]
+    [(? c-for?)                  (compile-for         x)]
+    [(? c-while?)                (compile-while       x)]
+    [(? c-do-while?)             (compile-do-while    x)]
+    [(? c-goto?)                 (compile-goto        x)]
+    [(? c-block?)                (compile-block       x)]
+    [(? c-return?)               (compile-return      x)]
+    [(? c-break?)                (compile-break       x)]
+    [(? c-continue?)             (compile-continue    x)]
+    [(? c-declaration?)          (compile-declaration x)]
     [_                (error "compile-statement: Unknown case" x)]))
 
 (: compile-label (-> c-label Pyramid))

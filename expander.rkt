@@ -44,14 +44,14 @@
       ))
   (define (expand-expression x)
     (match x
-      [`(function_call ,operator . ,operands) `(c-function-call ,(expand-expression operator) ,(map expand-expression operands))]
+      [`(function_call ,operator . ,operands) `(c-function-call ,(expand-expression operator) (list ,@(map expand-expression operands)))]
       [`(integer ,val)                        `(c-const ,val)]
       [`(char ,val)                           `(c-const ,val)]
-      [`(variable ,name)                      `(c-variable ,(string->symbol name))]
+      [`(variable ,name)                      `(c-variable (quote ,(string->symbol name)))]
       [`(ternary ,pred ,cons ,alt)            `(c-ternary ,(expand-expression pred) ,(expand-expression cons) ,(expand-expression alt))]
-      [`(binop ,left ,op ,right)              `(c-binop ,(string->symbol op) ,(expand-expression left) ,(expand-expression right))]
-      [`(unop ,op ,exp)                       `(c-unop ,(string->symbol op) ,(expand-expression exp))]
-      [`(postop ,exp ,op)                     `(c-unop ,(string->symbol op) ,(expand-expression exp))] ; TODO: Post-op should be different from unop.
+      [`(binop ,left ,op ,right)              `(c-binop (quote ,(string->symbol op)) ,(expand-expression left) ,(expand-expression right))]
+      [`(unop ,op ,exp)                       `(c-unop (quote ,(string->symbol op)) ,(expand-expression exp))]
+      [`(postop ,exp ,op)                     `(c-unop (quote ,(string->symbol op)) ,(expand-expression exp))] ; TODO: Post-op should be different from unop.
       [_ (error "expand-expression: Unknown syntax" x)]
       ))
   (define (expand-switch-case x)
