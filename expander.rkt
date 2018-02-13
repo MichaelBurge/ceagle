@@ -8,15 +8,16 @@
 
 (define-syntax (c-module-begin stx)
   (syntax-case stx ()
-    [(_ x) #`(#%module-begin (quote #,(expand-c #'x)))]))
+    ;[(_ x) #`(#%module-begin (quote #,(expand-c #'x)))]))
+    [(_ x) #`(#%module-begin #,(expand-c #'x))]))
 
 (begin-for-syntax
   (define (expand-c stx)
     (match (syntax->datum stx)
-      [`(c . ,xs) `(c-unit ,@(map expand-declaration xs))]))
+      [`(c . ,xs) `(c-unit (list ,@(map expand-declaration xs)))]))
   (define (expand-declaration x)
     (match x
-      [`(function_declaration ,mods ,ret-type ,name ,body) `(c-decl-func ,name (c-signature ,ret-type ()) ,(expand-statement body))]
+      [`(function_declaration ,mods ,ret-type ,name ,body) `(c-decl-func (quote ,(string->symbol name)) (c-signature ,(expand-type ret-type) '()) ,(expand-statement body))]
       [_ (error "expand-declaration: Unknown syntax" x)]))
   (define (expand-statement x)
     (match x
@@ -31,13 +32,13 @@
       [`(while ,pred ,body)           `(c-while ,(expand-expression pred) ,(expand-statement body))]
       [`(do_while ,body ,pred)        `(c-do-while ,(expand-expression pred) ,(expand-statement body))]
       [`(goto ,id)                    `(c-goto ,id)]
-      [`(block . ,xs)                 `(c-block (map expand-statement xs))]
+      [`(block . ,xs)                 `(c-block (list ,@(map expand-statement xs)))]
       [`(return ,x)                   `(c-return ,(expand-expression x))]
       [`(break)                       `(c-break)]
       [`(continue)                    `(c-continue)]
-      [`(declaration ,ty (declaration_variable ,name ,init)) `(c-decl-var ,name ,ty ,(expand-expression init) ())]
-      [`(empty)                       `(c-block ())]
-      [`(sequence . ,xs)              `(c-block ,(map expand-statement xs))]
+      [`(declaration ,ty (declaration_variable ,name ,init)) `(c-decl-var ,name ,(expand-type ty) ,(expand-expression init) '())]
+      [`(empty)                       `(c-block '())]
+      [`(sequence . ,xs)              `(c-block (list ,@(map expand-statement xs)))]
       [_ (error "expand-statement: Unknown syntax" x)]
       ))
   (define (expand-expression x)
@@ -58,4 +59,8 @@
       [`(switch_default ,seq)        `(c-switch-default (c-block ,(map expand-statement seq)))]
       [_ (error "expand-switch-case: Unknown syntax" x)]
       ))
+  (define (expand-type x)
+    (match x
+      ['(signed_int) `(c-type-fixed #t 256)]
+      [_ (error "expand-type: Unknown type" x)]))
   )

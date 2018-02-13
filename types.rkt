@@ -9,7 +9,7 @@
 (struct c-declaration () #:transparent)
 (struct c-expression () #:transparent)
 
-(struct c-type-fixed ([ bits : Integer ]) #:transparent)
+(struct c-type-fixed ([ signed? : Boolean ] [ bits : Integer ]) #:transparent)
 (struct c-type-struct-field ([ name : Symbol ] [ type : c-type ]) #:transparent)
 (struct c-type-struct ([ fs : c-type-struct-fields ]) #:transparent)
 

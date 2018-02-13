@@ -1,4 +1,4 @@
-#lang reader "reader.rkt"
+#lang ceagle
 
 int main() {
   return 0;

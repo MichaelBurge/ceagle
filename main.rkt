@@ -2,30 +2,27 @@
 
 (require "types.rkt")
 (require "lexer.rkt")
+(require "expander.rkt")
 
-(require brag)
+(provide read read-syntax #%module-begin)
 
-(provide (all-defined-out))
-
-; https://beautifulracket.com/jsonic/the-tokenizer.html
 (module reader racket
+  (require "lexer.rkt")
+  (require "parser.rkt")
+  
   (provide read read-syntax)
 
   (define (read in)
     (syntax->datum (read-syntax #f in)))
-  
-  (define (read-syntax path port)
-    (define parse-tree (parse path (make-tokenizer port)))
-    (skip-whitespace in)
-    (read-token src in))
 
-  (define (read-token src in)
-    (define-values (line col pos) (port-next-location in))
-    
-             
-    (define token-match
-      (regexp-match
-       
-    
-(define (skip-whitespace in)
-  (regexp-match #px"^\\s*" in))
+  (define (read-syntax path port)
+    (define tokens (tokenize-all port))
+    (define parse-tree (parse tokens))
+    (define module-datum `(module c-mod "expander.rkt"
+                            ,parse-tree))
+    (define stx (datum->syntax #f module-datum))
+    stx
+    ;; (displayln tokens)
+    ;; (displayln all-token-types)
+    ;(pretty-print (parse-to-datum tokens))
+    ))
