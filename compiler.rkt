@@ -85,7 +85,9 @@
         (pyr-begin (listof
                     (pyr-definition return-var (pyr-const 0))
                     (compile-statement x-body)
-                    (compile-label lbl-return))))))))
+                    (compile-label lbl-return)
+                    (pyr-variable return-var)
+                    )))))))
 
 (: compile-statement (-> c-statement Pyramid))
 (define (compile-statement x)
@@ -108,9 +110,8 @@
 (: compile-label (-> c-label Pyramid))
 (define (compile-label x)
   (destruct c-label x)
-  (let ([ name (make-label x-name)])
-    (expand-pyramid
-     `(asm (label ,name)))))
+  (expand-pyramid
+   `(asm (label (quote ,x-name)))))
 
 (: compile-expression (-> c-expression Pyramid))
 (define (compile-expression x)
@@ -277,7 +278,7 @@
 (: compile-jump (-> c-label Pyramid))
 (define (compile-jump x)
   (expand-pyramid
-   `(asm (cg-goto ,(c-label-name x)))))
+   `(asm (cg-goto (quote ,(c-label-name x))))))
 
 (: make-c-label (-> Symbol c-label))
 (define (make-c-label name)

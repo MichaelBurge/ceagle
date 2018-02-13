@@ -1,0 +1,4 @@
+#lang pyramid
+
+(defmacro (__builtin_set_test_result n)
+  `(set-test-result! ,n))

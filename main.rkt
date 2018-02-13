@@ -1,10 +1,17 @@
-#lang typed/racket
+#lang racket
 
 (require "types.rkt")
 (require "lexer.rkt")
 (require "expander.rkt")
+(require "compiler.rkt")
 
-(provide read read-syntax #%module-begin)
+(provide read
+         read-syntax
+         compile-c
+         expand-c
+         (all-from-out "types.rkt")
+         
+         (rename-out [ c-module-begin #%module-begin ]))
 
 (module reader racket
   (require "lexer.rkt")
@@ -18,11 +25,21 @@
   (define (read-syntax path port)
     (define tokens (tokenize-all port))
     (define parse-tree (parse tokens))
-    (define module-datum `(module c-mod "expander.rkt"
+    (define module-datum `(module c-mod ceagle
                             ,parse-tree))
+    ;(displayln module-datum)
     (define stx (datum->syntax #f module-datum))
     stx
     ;; (displayln tokens)
     ;; (displayln all-token-types)
     ;(pretty-print (parse-to-datum tokens))
+    ))
+
+(define-syntax (c-module-begin stx)
+  (syntax-case stx ()
+    ;[(_ x) #`(#%module-begin (quote #,(expand-c #'x)))]))
+    [(_ x)
+     #`(#%module-begin
+              (provide program)
+              (define program (compile-c (expand-c #'x))))]
     ))
