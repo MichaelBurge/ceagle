@@ -3,13 +3,14 @@
 (require (for-syntax racket))
 
 (require "types.rkt")
+(require "compiler.rkt")
 
 (provide (rename-out [ c-module-begin #%module-begin ]))
 
 (define-syntax (c-module-begin stx)
   (syntax-case stx ()
     ;[(_ x) #`(#%module-begin (quote #,(expand-c #'x)))]))
-    [(_ x) #`(#%module-begin #,(expand-c #'x))]))
+    [(_ x) #`(#%module-begin (compile-c #,(expand-c #'x)))]))
 
 (begin-for-syntax
   (define (expand-c stx)

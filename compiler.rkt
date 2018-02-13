@@ -4,14 +4,19 @@
 (require pyramid/types)
 (require pyramid/compiler)
 (require pyramid/parser)
+(require pyramid/utils)
 
 (require "utils.rkt")
 
-(: *return-point*   (Parameterof (U c-label #f)))
+(provide compile-c)
+
+(: *return-var*     (Parameterof (U Symbol  #f))) ; The value to be returned
+(define *return-var*     (make-parameter  #f))
+(: *return-point*   (Parameterof (U c-label #f))) ; The label that "return" jumps to
 (define *return-point*   (make-parameter  #f))
-(: *break-point*    (Parameterof (U c-label #f)))
+(: *break-point*    (Parameterof (U c-label #f))) ; The label that "break" jumps to
 (define *break-point*    (make-parameter  #f))
-(: *continue-point* (Parameterof (U c-label #f)))
+(: *continue-point* (Parameterof (U c-label #f))) ; The label that "continue" jumps to
 (define *continue-point* (make-parameter  #f))
 
 (module typechecker typed/racket
@@ -33,7 +38,7 @@
   (define decls
     (pyr-begin (map compile-declaration x-decls)))
   (define call-main
-    (c-function-call (c-const "main") (list)))
+    (c-function-call (c-variable 'main) (list)))
   (pyr-begin (list decls (compile-statement call-main))))
 
 (: compile-declaration (-> c-declaration Pyramid))
@@ -64,7 +69,18 @@
   (destruct c-signature x-sig)
   (: vars VariableNames)
   (define vars (map c-sigvar-name x-sig-args))
-  (pyr-definition x-name (pyr-lambda vars (compile-statement x-body))))
+  (let ([ lbl-return (make-c-label x-name)]
+        [ return-var (make-label-name x-name)])
+    (parameterize ([ *return-var* return-var ]
+                   [ *return-point* lbl-return ])
+      (pyr-definition
+       x-name
+       (pyr-lambda
+        vars
+        (pyr-begin (listof
+                    (pyr-definition return-var (pyr-const 0))
+                    (compile-statement x-body)
+                    (compile-label lbl-return))))))))
 
 (: compile-statement (-> c-statement Pyramid))
 (define (compile-statement x)
@@ -220,9 +236,16 @@
 
 (: compile-return      (-> c-return      Pyramid))
 (define (compile-return x)
+  (destruct c-return x)
   (define lbl (*return-point*))
+  (define var (*return-var*))
   (if lbl
-      (compile-jump lbl)
+      (if x-val
+          (if var
+              (pyr-begin (listof (pyr-assign var (compile-expression x-val))
+                                 (compile-jump lbl)))
+              (error "compile-return: Unset return variable"))
+          (compile-jump lbl))
       (error "compile-return: Unset return-point")))
 
 (: compile-break       (-> c-break       Pyramid))
