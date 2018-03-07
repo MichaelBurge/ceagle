@@ -1,23 +1,13 @@
-#lang typed/racket
+#lang typed/racket/no-check
 
 (require "types.rkt")
-(require pyramid/types)
-(require pyramid/compiler)
+(require (submod pyramid/types ast))
+(require pyramid/ast)
 (require pyramid/parser)
+(require (submod pyramid/parser macros))
 (require pyramid/utils)
 
-(require "utils.rkt")
-
 (provide compile-c)
-
-(: *return-var*     (Parameterof (U Symbol  #f))) ; The value to be returned
-(define *return-var*     (make-parameter  #f))
-(: *return-point*   (Parameterof (U c-label #f))) ; The label that "return" jumps to
-(define *return-point*   (make-parameter  #f))
-(: *break-point*    (Parameterof (U c-label #f))) ; The label that "break" jumps to
-(define *break-point*    (make-parameter  #f))
-(: *continue-point* (Parameterof (U c-label #f))) ; The label that "continue" jumps to
-(define *continue-point* (make-parameter  #f))
 
 (module typechecker typed/racket
   (require "types.rkt")
@@ -41,8 +31,7 @@
     (c-function-call (c-variable 'main) (list)))
   (pyr-begin
    (listof
-    (pyr-macro-application 'include (list (pyr-variable 'ceagle)
-                                          (pyr-const "builtins.pmd")))
+    (expand-pyramid `(include ceagle "builtins.pmd"))
     decls
     (compile-expression call-main))))
 
@@ -74,20 +63,11 @@
   (destruct c-signature x-sig)
   (: vars VariableNames)
   (define vars (map c-sigvar-name x-sig-args))
-  (let ([ lbl-return (make-c-label x-name)]
-        [ return-var (make-label-name x-name)])
-    (parameterize ([ *return-var* return-var ]
-                   [ *return-point* lbl-return ])
-      (pyr-definition
-       x-name
-       (pyr-lambda
-        vars
-        (pyr-begin (listof
-                    (pyr-definition return-var (pyr-const 0))
-                    (compile-statement x-body)
-                    (compile-label lbl-return)
-                    (pyr-variable return-var)
-                    )))))))
+  (expand-pyramid
+   `(define (,x-name ,@vars)
+      ,(shrink-pyramid
+        (with-returnpoint
+          (compile-statement x-body))))))
 
 (: compile-statement (-> c-statement Pyramid))
 (define (compile-statement x)
@@ -174,7 +154,7 @@
                           (compile-expression sw-actual))
                   (compile-statement hd-body)
                   (compile-cases tl)))))
-  (compile-cases sw-cs))
+  (with-breakpoint (compile-cases sw-cs)))
 
 (: compile-if          (-> c-if          Pyramid))
 (define (compile-if x)
@@ -189,25 +169,25 @@
   (destruct c-for x)
   (define init (if x-init
                    (compile-declaration x-init)
-                   `(begin)))
+                   (pyr-begin (list))))
   (define post (if x-post
                    (compile-expression x-post)
-                   `(begin)))
+                   (pyr-begin (list))))
   (define pred (if x-pred
                    (compile-expression x-pred)
-                   `1))
-  (define lbl-begin    (make-c-label 'for-begin))
-  (define lbl-continue (make-c-label 'for-continue))
-  (define lbl-break    (make-c-label 'for-break))
-  
-  (expand-pyramid
-   `(begin
-      ,init
-      (compile-label lbl-continue)
-      (if ,pred
-          (begin ,(compile-statement x-body)
-                 ,(compile-jump lbl-continue))
-          (compile-label lbl-break)))))
+                   (pyr-const 1)))
+
+  (with-breakpoint
+    (quasiquote-pyramid
+     `(begin ,init
+             (loop-forever
+              ,(with-continuepoint
+                 (quasiquote-pyramid
+                  `(if ,pred
+                       (begin ,(compile-statement x-body)
+                              ,post
+                              (continue 0))
+                       (break 0)))))))))
 
 (: compile-while       (-> c-while       Pyramid))
 (define (compile-while x)
@@ -217,20 +197,13 @@
 (: compile-do-while    (-> c-do-while    Pyramid))
 (define (compile-do-while x)
   (destruct c-do-while x)
-  (define lbl-begin    (make-c-label 'do-while-begin   ))
-  (define lbl-continue (make-c-label 'do-while-continue))
-  (define lbl-break    (make-c-label 'do-while-break   ))
-  
-  (parameterize ([ *break-point*    lbl-break]
-                 [ *continue-point* lbl-continue])
-    (expand-pyramid
-     `(begin
-        ,(compile-label     lbl-begin)
-        ,(compile-statement x-body)
-        ,(compile-label     lbl-continue)
-        (if ,(compile-expression x-pred)
-            ,(compile-jump lbl-begin)
-            ,(compile-label lbl-break))))))
+  (with-breakpoint
+    (with-continuepoint
+      (quasiquote-pyramid
+       `(begin ,x-body
+               (if ,(compile-expression x-pred)
+                   (continue 0)
+                   (break #f)))))))
   
 (: compile-goto        (-> c-goto        Pyramid))
 (define (compile-goto x)
@@ -243,30 +216,16 @@
 (: compile-return      (-> c-return      Pyramid))
 (define (compile-return x)
   (destruct c-return x)
-  (define lbl (*return-point*))
-  (define var (*return-var*))
-  (if lbl
-      (if x-val
-          (if var
-              (pyr-begin (listof (pyr-assign var (compile-expression x-val))
-                                 (compile-jump lbl)))
-              (error "compile-return: Unset return variable"))
-          (compile-jump lbl))
-      (error "compile-return: Unset return-point")))
+  (quasiquote-pyramid
+   `(return ,(compile-expression x-val))))
 
 (: compile-break       (-> c-break       Pyramid))
 (define (compile-break x)
-  (define lbl (*break-point*))
-  (if lbl
-      (compile-jump lbl)
-      (error "compile-break: Unset break-point")))
+  (expand-pyramid `(break #f)))
 
 (: compile-continue    (-> c-continue    Pyramid))
 (define (compile-continue x)
-  (define lbl (*continue-point*))
-  (if lbl
-      (compile-jump lbl)
-      (error "compile-continue: unset continue-point)")))
+  (expand-pyramid `(continue #f)))
 
 (: compile-c-sequence (-> c-statements Pyramid))
 (define (compile-c-sequence xs)
@@ -283,3 +242,19 @@
 (: make-c-label (-> Symbol c-label))
 (define (make-c-label name)
   (c-label (make-label-name name)))
+
+(: with-escapepoint (-> Symbol Pyramid Pyramid))
+(define (with-escapepoint name exp)
+  (expand-pyramid `(call/cc (λ (,name) ,(shrink-pyramid exp)))))
+
+(: with-returnpoint (-> Pyramid Pyramid))
+(define (with-returnpoint exp)
+  (with-escapepoint 'return exp))
+
+(: with-continuepoint (-> Pyramid Pyramid))
+(define (with-continuepoint exp)
+  (with-escapepoint 'continue exp))
+
+(: with-breakpoint (-> Pyramid Pyramid))
+(define (with-breakpoint exp)
+  (with-escapepoint 'break exp))

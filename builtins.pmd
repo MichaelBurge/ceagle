@@ -1,4 +1,21 @@
 #lang pyramid
 
+(require psl "arith.pmd")
+(require psl "syntax.pmd")
+
 (defmacro (__builtin_set_test_result n)
   `(set-test-result! ,n))
+
+(defmacro (-- x)
+  `(begin (set! ,x (- ,x 1))
+          ,x))
+
+(defmacro (*= x y)
+  `(begin (set! ,x (* ,x ,y))
+          ,x))
+
+(defmacro (loop-forever body)
+  `((λ ()
+      (define (loop) ,body (loop))
+      (loop))))
+  

@@ -17,7 +17,7 @@
     [`(expression_statement ,exp)   (c-expression-statement (expand-expression exp))]
     [`(switch ,actual . ,cases)     (c-switch actual (map expand-switch-case cases))]
     [`(if ,pred ,cons ,alt)         (c-if (expand-expression pred) (expand-statement cons) (expand-statement alt))]
-    [`(for ,init ,pred ,post ,body) (c-for (if (null? init) #f (expand-declaration init))
+    [`(for ,init ,pred ,post ,body) (c-for (if (null? init) #f (expand-statement init))
                                            (if (null? pred) #f (expand-expression pred))
                                            (if (null? post) #f (expand-expression post))
                                            (expand-statement body))]
@@ -28,7 +28,8 @@
     [`(return ,x)                   (c-return (expand-expression x))]
     [`(break)                       (c-break)]
     [`(continue)                    (c-continue)]
-    [`(declaration ,ty (declaration_variable ,name ,init)) (c-decl-var name (expand-type ty) (expand-expression init) '())]
+    [`(declaration ,ty (declaration_variable (variable ,name) ,init))
+     (c-decl-var (string->symbol name) (expand-type ty) (expand-expression init) '())]
     [`(empty)                       (c-block '())]
     [`(sequence . ,xs)              (c-block (map expand-statement xs))]
     [_ (error "expand-statement: Unknown syntax" x)]
