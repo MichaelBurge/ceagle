@@ -10,6 +10,12 @@
   `(begin (set! ,x (- ,x 1))
           ,x))
 
+(defmacro (++ x)
+  `(begin (set! ,x (+ ,x 1))
+          ,x))
+
+(defmacro (== x y) `(= ,x ,y))
+
 (defmacro (*= x y)
   `(begin (set! ,x (* ,x ,y))
           ,x))
@@ -18,4 +24,3 @@
   `((λ ()
       (define (loop) ,body (loop))
       (loop))))
-  

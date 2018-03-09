@@ -13,9 +13,10 @@
     [_ (error "expand-declaration: Unknown syntax" x)]))
 (define (expand-statement x)
   (match x
-    [`(label_definition ,id)        (c-label id)]
+    [`(label_definition ,id ,stmt)  (c-block (list (c-label (string->symbol id)) (expand-statement stmt)))]
     [`(expression_statement ,exp)   (c-expression-statement (expand-expression exp))]
     [`(switch ,actual . ,cases)     (c-switch actual (map expand-switch-case cases))]
+    [`(if ,pred ,cons)              (c-if (expand-expression pred) (expand-statement cons) (c-block '()))]
     [`(if ,pred ,cons ,alt)         (c-if (expand-expression pred) (expand-statement cons) (expand-statement alt))]
     [`(for ,init ,pred ,post ,body) (c-for (if (null? init) #f (expand-statement init))
                                            (if (null? pred) #f (expand-expression pred))
@@ -23,7 +24,7 @@
                                            (expand-statement body))]
     [`(while ,pred ,body)           (c-while (expand-expression pred) (expand-statement body))]
     [`(do_while ,body ,pred)        (c-do-while (expand-expression pred) (expand-statement body))]
-    [`(goto ,id)                    (c-goto id)]
+    [`(goto ,id)                    (c-goto (string->symbol id))]
     [`(block . ,xs)                 (c-block (map expand-statement xs))]
     [`(return ,x)                   (c-return (expand-expression x))]
     [`(break)                       (c-break)]

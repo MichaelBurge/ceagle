@@ -12,10 +12,10 @@
 (module typechecker typed/racket
   (require "types.rkt")
   (provide (all-defined-out))
-  
+
   (: *type-registry* (HashTable Symbol c-type))
   (define *type-registry* (make-hash))
-  
+
   (: register-type! (-> Symbol c-type Void))
   (define (register-type! name ty)
     (hash-set! *type-registry* name ty))
@@ -204,7 +204,7 @@
                (if ,(compile-expression x-pred)
                    (continue 0)
                    (break #f)))))))
-  
+
 (: compile-goto        (-> c-goto        Pyramid))
 (define (compile-goto x)
   (compile-jump (c-label (c-goto-target x))))
@@ -237,7 +237,7 @@
 (: compile-jump (-> c-label Pyramid))
 (define (compile-jump x)
   (expand-pyramid
-   `(asm (cg-goto (quote ,(c-label-name x))))))
+   `(asm (goto (label (quote ,(c-label-name x)))))))
 
 (: make-c-label (-> Symbol c-label))
 (define (make-c-label name)
