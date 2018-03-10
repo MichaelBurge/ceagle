@@ -10,13 +10,16 @@
          compile-c
          expand-c
          (all-from-out "types.rkt")
-         
+
          (rename-out [ c-module-begin #%module-begin ]))
 
 (module reader racket
   (require "lexer.rkt")
   (require "parser.rkt")
-  
+  (require pyramid/io)
+  (require pyramid/globals)
+  (require racket/pretty)
+
   (provide read read-syntax)
 
   (define (read in)
@@ -24,7 +27,11 @@
 
   (define (read-syntax path port)
     (define tokens (tokenize-all port))
+    (verbose-section "Ceagle Tokens" VERBOSITY-MEDIUM
+                   (pretty-print tokens))
     (define parse-tree (parse tokens))
+    (verbose-section "Ceagle Parse Tree" VERBOSITY-MEDIUM
+                   (pretty-print (syntax->datum parse-tree)))
     (define module-datum `(module c-mod ceagle
                             ,parse-tree))
     ;(displayln module-datum)

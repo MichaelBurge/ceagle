@@ -11,14 +11,63 @@
 
 (module typechecker typed/racket
   (require "types.rkt")
+  (require/typed racket/hash
+    [ hash-union (-> (HashTable Symbol c-type) (HashTable Symbol c-type) [#:combine/key (-> Symbol c-type c-type c-type)] (HashTable Symbol c-type))])
+  (require pyramid/utils)
+
   (provide (all-defined-out))
 
-  (: *type-registry* (HashTable Symbol c-type))
-  (define *type-registry* (make-hash))
+  (: *type-registry* (Parameterof TypeRegistry))
+  (define *type-registry* (make-parameter (make-type-registry)))
+
+  (: *variables* (Parameterof variable-table))
+  (define *variables* (make-parameter (make-variable-table)))
 
   (: register-type! (-> Symbol c-type Void))
   (define (register-type! name ty)
-    (hash-set! *type-registry* name ty))
+    (hash-set! (*type-registry*) name ty))
+
+  (: register-variable! (-> Symbol c-type Void))
+  (define (register-variable! name ty)
+    (hash-set! (*variables*) name ty))
+
+  (: with-function-scope (All (A) (-> c-signature (-> A) A)))
+  (define (with-function-scope sig f)
+    (parameterize ([ *variables* (hash-union (*variables*)
+                                             (signature->variable-table sig)
+                                             #:combine/key (λ ([ k : Symbol ] [v0 : c-type] [v : c-type]) v))])
+      (f)))
+
+  (: signature->variable-table (-> c-signature variable-table))
+  (define (signature->variable-table sig)
+    (destruct c-signature sig)
+    (define ret (make-variable-table))
+    (for ([ sv sig-args ])
+      (hash-set! ret (c-sigvar-name sv) (c-sigvar-type sv)))
+    ret)
+
+  (: resolve-type (-> c-type c-type))
+  (define (resolve-type ty)
+    (match ty
+      [(struct c-type-alias (name)) (resolve-type (hash-ref (*type-registry*)
+                                                            name
+                                                            (λ () (error "resolve-type: Unknown type" name))))]
+      [_ ty]))
+
+  (: expression-type (-> c-expression c-type))
+  (define (expression-type exp)
+    (define t-uint (c-type-fixed #f 256))
+    (define t-int  (c-type-fixed #t 256))
+    (match exp
+      [(struct c-const ((? exact-positive-integer?))) t-uint]
+      [(struct c-const ((? exact-integer?)))          t-int]
+      [(struct c-variable (name))                     (hash-ref (*variables*) name (λ () (error "expression-type: Unknown variable" name)))]
+      [(struct c-ternary (_ cons _)) (expression-type cons)]
+      [(struct c-binop (_ left _)) (expression-type left)]
+      [(struct c-unop (_ exp)) (expression-type exp)]
+      [(struct c-function-call _) (error "expression-type: Unimplemented function call" exp)]
+      [(struct c-field-access _) (error "expression-type: Unimplemented field access" exp)]
+      ))
   )
 (require 'typechecker)
 
@@ -46,10 +95,18 @@
 (: compile-decl-var (-> c-decl-var Pyramid))
 (define (compile-decl-var x)
   (destruct c-decl-var x)
+  (register-variable! x-name x-type)
   (pyr-definition x-name
                   (if x-init
                       (compile-expression x-init)
-                      (pyr-const 0))))
+                      (compile-default-initializer x-type))))
+
+(: compile-default-initializer (-> c-type Pyramid))
+(define (compile-default-initializer ty)
+  (match (resolve-type ty)
+    [(struct c-type-fixed _) (pyr-const 0)]
+    [(struct c-type-alias _) (error "compile-default-initializer: Unexpected case")]
+    [(struct c-type-struct _) (error "compile-default-initializer: TODO - implement struct initializers")]))
 
 (: compile-decl-type (-> c-decl-type Pyramid))
 (define (compile-decl-type x)
@@ -102,6 +159,7 @@
     [(? c-binop?)         (compile-binop x)]
     [(? c-unop?)          (compile-unop x)]
     [(? c-function-call?) (compile-function-call x)]
+    [(? c-field-access?)  (compile-field-access x)]
     [_                  (error "compile-expression: Unknown case" x)]))
 
 (: compile-const         (-> c-const         Pyramid))
@@ -122,14 +180,14 @@
 (: compile-binop         (-> c-binop         Pyramid))
 (define (compile-binop x)
   (destruct c-binop x)
-  (pyr-application (pyr-variable x-op)
+  (pyr-application (op->builtin x-op)
                    (list (compile-expression x-left)
                          (compile-expression x-right))))
 
 (: compile-unop          (-> c-unop          Pyramid))
 (define (compile-unop x)
   (destruct c-unop x)
-  (pyr-application (pyr-variable x-op)
+  (pyr-application (op->builtin x-op)
                    (list (compile-expression x-exp))))
 
 (: compile-function-call (-> c-function-call Pyramid))
@@ -137,6 +195,18 @@
   (destruct c-function-call x)
   (pyr-application (compile-expression x-func)
                    (map compile-expression x-args)))
+
+(: compile-field-access (-> c-field-access Pyramid))
+(define (compile-field-access x)
+  (destruct c-field-access x)
+  (define ty (expression-type x-source))
+  (define field-table (type-field-table ty))
+  (define info (hash-ref field-table x-name))
+  (destruct c-field-info info)
+  (quasiquote-pyramid
+   `(%c-read-field ,(compile-expression x-source)
+                   ,(pyr-const info-offset)
+                   ,(pyr-const info-size))))
 
 (: compile-switch      (-> c-switch      Pyramid))
 (define (compile-switch sw)
@@ -180,7 +250,7 @@
   (with-breakpoint
     (quasiquote-pyramid
      `(begin ,init
-             (loop-forever
+             (%c-loop-forever
               ,(with-continuepoint
                  (quasiquote-pyramid
                   `(if ,pred
@@ -258,3 +328,38 @@
 (: with-breakpoint (-> Pyramid Pyramid))
 (define (with-breakpoint exp)
   (with-escapepoint 'break exp))
+
+(: type-field-table (-> c-type FieldTable))
+(define (type-field-table ty)
+  (match (resolve-type ty)
+    [(struct c-type-fixed _) (make-field-table)]
+    [(struct c-type-alias _) (error "type-field-table: Unexpected case" ty)]
+    [(struct c-type-struct (fs)) (struct-fields->field-table fs)]
+    [x (error "type-field-table: Unknown case" x)]
+    ))
+
+(: type-size (-> c-type Integer))
+(define (type-size ty)
+  (match ty
+    [(struct c-type-fixed _) 32]
+    [_ (error "type-size: Unknown type" ty)]))
+
+(: struct-fields->field-table (-> c-type-struct-fields FieldTable))
+(define (struct-fields->field-table fs)
+  (define ret (make-field-table))
+  (define os 0)
+  (for ([ f fs ])
+    (let ([ size (type-size (c-type-struct-field-type f))])
+      (hash-set! ret (c-type-struct-field-name f) (c-field-info os size))
+      (set! os (+ os size))
+      ))
+  ret)
+
+(: symbol-append (-> Symbol Symbol Symbol))
+(define (symbol-append a b)
+  (string->symbol (string-append (symbol->string a)
+                                 (symbol->string b))))
+
+(: op->builtin (-> Symbol Pyramid))
+(define (op->builtin op)
+  (pyr-variable (symbol-append '%c- op)))

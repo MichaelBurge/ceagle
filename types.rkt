@@ -12,9 +12,10 @@
 (struct c-type-fixed ([ signed? : Boolean ] [ bits : Integer ]) #:transparent)
 (struct c-type-struct-field ([ name : Symbol ] [ type : c-type ]) #:transparent)
 (struct c-type-struct ([ fs : c-type-struct-fields ]) #:transparent)
+(struct c-type-alias ([ name : Symbol ]) #:transparent)
 
 (define-type c-type-struct-fields (Listof c-type-struct-field))
-(define-type c-type (U c-type-fixed c-type-struct))
+(define-type c-type (U c-type-fixed c-type-struct c-type-alias))
 
 (struct c-unit  ([ decls : c-declarations ]) #:transparent)
 (struct c-decl-var  c-declaration ([ name : Symbol ] [ type : c-type ] [ init : (Maybe c-expression) ] [ mods : c-modifiers ]) #:transparent)
@@ -58,6 +59,9 @@
 (struct c-binop    c-expression ([ op : Symbol ] [ left : c-expression ] [ right : c-expression ]) #:transparent)
 (struct c-unop     c-expression ([ op : Symbol ] [ exp : c-expression ]) #:transparent)
 (struct c-function-call c-expression ([ func : c-expression ] [ args : c-expressions ]) #:transparent)
+(struct c-field-access  c-expression ([ source : c-expression ] [ name : Symbol ]) #:transparent)
+
+(struct c-field-info ([ offset : Integer ] [ size : Integer ]) #:transparent)
 
 (define-type c-statements (Listof c-statement))
 (define-type c-modifiers (Listof c-modifier))
@@ -66,3 +70,16 @@
 (define-type c-expressions (Listof c-expression))
 (define-type c-sigvars     (Listof c-sigvar))
 (define-type c-signatures  (Listof c-signature))
+
+(define-type FieldTable (HashTable Symbol c-field-info))
+(define-type TypeRegistry (HashTable Symbol c-type))
+(define-type variable-table (HashTable Symbol c-type))
+
+(: make-field-table (-> FieldTable))
+(define (make-field-table) (make-hash))
+
+(: make-variable-table (-> variable-table))
+(define (make-variable-table) (make-hash))
+
+(: make-type-registry (-> TypeRegistry))
+(define make-type-registry make-hash)

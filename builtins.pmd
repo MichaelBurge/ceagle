@@ -6,21 +6,22 @@
 (defmacro (__builtin_set_test_result n)
   `(set-test-result! ,n))
 
-(defmacro (-- x)
+(defmacro (%c--- x)
   `(begin (set! ,x (- ,x 1))
           ,x))
 
-(defmacro (++ x)
+(defmacro (%c-++ x)
   `(begin (set! ,x (+ ,x 1))
           ,x))
 
-(defmacro (== x y) `(= ,x ,y))
+(defmacro (%c-== x y) `(= ,x ,y))
+(defmacro (%c-> x y) `(> ,x ,y))
 
-(defmacro (*= x y)
+(defmacro (%c-*= x y)
   `(begin (set! ,x (* ,x ,y))
           ,x))
 
-(defmacro (loop-forever body)
+(defmacro (%c-loop-forever body)
   `((λ ()
       (define (loop) ,body (loop))
       (loop))))
