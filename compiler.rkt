@@ -68,6 +68,18 @@
       [(struct c-function-call _) (error "expression-type: Unimplemented function call" exp)]
       [(struct c-field-access _) (error "expression-type: Unimplemented field access" exp)]
       ))
+
+  (: bits->bytes (-> Integer Integer))
+  (define (bits->bytes x) (quotient x 8))
+
+  (: type-size (-> c-type Integer))
+  (define (type-size x)
+    (match x
+      [(struct c-type-fixed (_ bits)) (bits->bytes bits)]
+      [(struct c-type-struct (fields)) (for/sum ([ field fields ])
+                                         (type-size (c-type-struct-field-type field)))]
+      [(struct c-type-alias _) (type-size (resolve-type x))]
+      [_ (error "type-size: Unknown case" x)]))
   )
 (require 'typechecker)
 
@@ -82,7 +94,7 @@
    (listof
     (expand-pyramid `(include ceagle "builtins.pmd"))
     decls
-    (compile-expression call-main))))
+    (compile-expression call-main 'rvalue))))
 
 (: compile-declaration (-> c-declaration Pyramid))
 (define (compile-declaration x)
@@ -103,10 +115,11 @@
 
 (: compile-default-initializer (-> c-type Pyramid))
 (define (compile-default-initializer ty)
-  (match (resolve-type ty)
+  (match ty
     [(struct c-type-fixed _) (pyr-const 0)]
-    [(struct c-type-alias _) (error "compile-default-initializer: Unexpected case")]
-    [(struct c-type-struct _) (error "compile-default-initializer: TODO - implement struct initializers")]))
+    [(struct c-type-alias _) (compile-default-initializer (resolve-type ty))]
+    [(struct c-type-struct _) (quasiquote-pyramid `(%c-allocate-struct ,(pyr-const (type-size ty))))]
+    ))
 
 (: compile-decl-type (-> c-decl-type Pyramid))
 (define (compile-decl-type x)
@@ -130,7 +143,7 @@
 (define (compile-statement x)
   (match x
     [(? c-label?)                (compile-label       x)]
-    [(? c-expression-statement?) (compile-expression  (c-expression-statement-exp x))]
+    [(? c-expression-statement?) (compile-expression  (c-expression-statement-exp x) 'rvalue)]
     [(? c-switch?)               (compile-switch      x)]
     [(? c-if?)                   (compile-if          x)]
     [(? c-for?)                  (compile-for         x)]
@@ -142,7 +155,7 @@
     [(? c-break?)                (compile-break       x)]
     [(? c-continue?)             (compile-continue    x)]
     [(? c-declaration?)          (compile-declaration x)]
-    [_                (error "compile-statement: Unknown case" x)]))
+    [_                           (error "compile-statement: Unknown case" x)]))
 
 (: compile-label (-> c-label Pyramid))
 (define (compile-label x)
@@ -150,63 +163,90 @@
   (expand-pyramid
    `(asm (label (quote ,x-name)))))
 
-(: compile-expression (-> c-expression Pyramid))
-(define (compile-expression x)
+(: compile-expression (-> c-expression c-value-type Pyramid))
+(define (compile-expression x val-ty)
   (match x
-    [(? c-const?)         (compile-const x)]
-    [(? c-variable?)      (compile-variable x)]
-    [(? c-ternary?)       (compile-ternary x)]
-    [(? c-binop?)         (compile-binop x)]
-    [(? c-unop?)          (compile-unop x)]
-    [(? c-function-call?) (compile-function-call x)]
-    [(? c-field-access?)  (compile-field-access x)]
-    [_                  (error "compile-expression: Unknown case" x)]))
+    [(? c-const?)         (compile-const         x val-ty)]
+    [(? c-variable?)      (compile-variable      x val-ty)]
+    [(? c-ternary?)       (compile-ternary       x val-ty)]
+    [(? c-binop?)         (compile-binop         x val-ty)]
+    [(? c-unop?)          (compile-unop          x val-ty)]
+    [(? c-function-call?) (compile-function-call x val-ty)]
+    [(? c-field-access?)  (compile-field-access  x val-ty)]
+    [_                    (error "compile-expression: Unknown case" x)]))
 
-(: compile-const         (-> c-const         Pyramid))
-(define (compile-const x)
-  (pyr-const (c-const-value x)))
+(: compile-const (-> c-const c-value-type Pyramid))
+(define (compile-const x val-ty)
+  (match val-ty
+    ['lvalue (error "compile-const: A constant cannot be an lvalue" x)]
+    ['rvalue (pyr-const (c-const-value x))]
+    ))
 
-(: compile-variable      (-> c-variable      Pyramid))
-(define (compile-variable x)
-  (pyr-variable (c-variable-name x)))
+(: compile-variable (-> c-variable c-value-type Pyramid))
+(define (compile-variable x val-ty)
+  (define exp (pyr-variable (c-variable-name x)))
+  (match val-ty
+    ['rvalue exp]
+    ['lvalue
+     (let ([ exp-ty (resolve-type (expression-type x))])
+       (match exp-ty
+         [(struct c-type-fixed  _) (quasiquote-pyramid `(%-fixnum-lvalue ,exp))]
+         [(struct c-type-struct _) exp]
+         [(struct c-type-alias  _) (error "compile-variable: Unexpected case" x val-ty exp-ty)]
+         [_                        (error "compile-variable: Unknown case")]))]
+    [_ (error "compile-variable: Unknown case" x)]
+    ))
 
-(: compile-ternary       (-> c-ternary       Pyramid))
-(define (compile-ternary x)
+(: compile-ternary (-> c-ternary c-value-type Pyramid))
+(define (compile-ternary x val-ty)
   (destruct c-ternary x)
-  (pyr-if (compile-expression x-pred)
-          (compile-expression x-consequent)
-          (compile-expression x-alternative)))
+  (pyr-if (compile-expression x-pred        'rvalue)
+          (compile-expression x-consequent  val-ty)
+          (compile-expression x-alternative val-ty)))
 
-(: compile-binop         (-> c-binop         Pyramid))
-(define (compile-binop x)
+(: compile-binop (-> c-binop c-value-type Pyramid))
+(define (compile-binop x val-ty)
   (destruct c-binop x)
+  (define left-val-ty (if (wants-lvalue? x-op)
+                          'lvalue
+                          'rvalue))
   (pyr-application (op->builtin x-op)
-                   (list (compile-expression x-left)
-                         (compile-expression x-right))))
+                   (list (compile-expression x-left  left-val-ty)
+                         (compile-expression x-right 'rvalue))))
 
-(: compile-unop          (-> c-unop          Pyramid))
-(define (compile-unop x)
+(: compile-unop (-> c-unop c-value-type Pyramid))
+(define (compile-unop x val-ty)
   (destruct c-unop x)
-  (pyr-application (op->builtin x-op)
-                   (list (compile-expression x-exp))))
+  (match val-ty
+    ['lvalue (error "compile-unop: Unary operators cannot be lvalues" x)]
+    ['rvalue (pyr-application (op->builtin x-op)
+                              (list (compile-expression x-exp val-ty)))]))
 
-(: compile-function-call (-> c-function-call Pyramid))
-(define (compile-function-call x)
+(: compile-function-call (-> c-function-call c-value-type Pyramid))
+(define (compile-function-call x val-ty)
   (destruct c-function-call x)
-  (pyr-application (compile-expression x-func)
-                   (map compile-expression x-args)))
+  (match val-ty
+    ['lvalue (error "compile-function-call: Function calls cannot be lvalues" x)]
+    ['rvalue (pyr-application (compile-expression x-func 'rvalue)
+                              (map (λ (x) (compile-expression x 'rvalue))
+                                   x-args))]))
 
-(: compile-field-access (-> c-field-access Pyramid))
-(define (compile-field-access x)
+(: compile-field-access (-> c-field-access c-value-type Pyramid))
+(define (compile-field-access x val-ty)
   (destruct c-field-access x)
   (define ty (expression-type x-source))
   (define field-table (type-field-table ty))
   (define info (hash-ref field-table x-name))
   (destruct c-field-info info)
-  (quasiquote-pyramid
-   `(%c-read-field ,(compile-expression x-source)
-                   ,(pyr-const info-offset)
-                   ,(pyr-const info-size))))
+  (define ptr-exp
+    (quasiquote-pyramid
+     `(%c-struct-field ,(compile-expression x-source 'lvalue)
+                       ,(pyr-const info-offset)
+                       ,(pyr-const info-size))))
+  (match val-ty
+    ['lvalue ptr-exp]
+    ['rvalue (quasiquote-pyramid `(%c-word-read ,ptr-exp))]
+    ))
 
 (: compile-switch      (-> c-switch      Pyramid))
 (define (compile-switch sw)
@@ -287,7 +327,7 @@
 (define (compile-return x)
   (destruct c-return x)
   (quasiquote-pyramid
-   `(return ,(compile-expression x-val))))
+   `(return ,(compile-expression x-val 'rvalue))))
 
 (: compile-break       (-> c-break       Pyramid))
 (define (compile-break x)
@@ -338,12 +378,6 @@
     [x (error "type-field-table: Unknown case" x)]
     ))
 
-(: type-size (-> c-type Integer))
-(define (type-size ty)
-  (match ty
-    [(struct c-type-fixed _) 32]
-    [_ (error "type-size: Unknown type" ty)]))
-
 (: struct-fields->field-table (-> c-type-struct-fields FieldTable))
 (define (struct-fields->field-table fs)
   (define ret (make-field-table))
@@ -362,4 +396,19 @@
 
 (: op->builtin (-> Symbol Pyramid))
 (define (op->builtin op)
-  (pyr-variable (symbol-append '%c- op)))
+  (pyr-variable (symbol-append '%c-word-op op)))
+
+(: int->lvalue (-> Pyramid Pyramid))
+(define (int->lvalue x)
+  `(%-fixnum-lvalue ,x))
+
+(: int->rvalue (-> Pyramid Pyramid))
+(define (int->rvalue x)
+  `(%-unbox ,x))
+
+(: assign-ops (Setof Symbol))
+(define assign-ops (apply set '(<<= >>= += -= *= /= %= \|\|= \|= ^= &&= &= =)))
+
+(: wants-lvalue? (-> Symbol Boolean))
+(define (wants-lvalue? op)
+  (set-member? assign-ops op))

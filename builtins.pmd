@@ -6,22 +6,57 @@
 (defmacro (__builtin_set_test_result n)
   `(set-test-result! ,n))
 
-(defmacro (%c--- x)
-  `(begin (set! ,x (- ,x 1))
-          ,x))
+(defmacro (%c-define-word-assign-unop assign-op base-op)
+  `(defmacro (,assign-op x)
+     `(let ([ ptr ,x ])
+        (%c-word-write! ptr (,,base-op (%c-word-read ptr))))))
 
-(defmacro (%c-++ x)
-  `(begin (set! ,x (+ ,x 1))
-          ,x))
+(defmacro (%c-define-word-assign-binop assign-op base-op)
+  `(defmacro (,assign-op x y)
+     `(let ([ ptr ,x ])
+        (%c-word-write! ptr (,,base-op (%c-word-read ptr) ,y)))))
 
-(defmacro (%c-== x y) `(= ,x ,y))
-(defmacro (%c-> x y) `(> ,x ,y))
+; Unary operators
 
-(defmacro (%c-*= x y)
-  `(begin (set! ,x (* ,x ,y))
-          ,x))
+(%c-define-word-assign-unop %c-word-op-- '%c-word-op-1)
+(%c-define-word-assign-unop %c-word-op++ '%c-word-op+1)
+
+; Binary operators
+
+(%c-define-word-assign-binop %c-word-op*= '%c-word-op*)
+(%c-define-word-assign-binop %c-word-op=  '%c-word-opright)
+
+(defmacro (%c-word-op-1 x)  `(- ,x 1))
+(defmacro (%c-word-op+1 x)  `(+ ,x 1))
+(defmacro (%c-word-op* x y) `(* ,x ,y))
+
+(defmacro (%c-word-op== x y) `(= ,x ,y))
+(defmacro (%c-word-op> x y)  `(> ,x ,y))
+(defmacro (%c-word-op+ x y)  `(+ ,x ,y))
+
+; Other utilities
 
 (defmacro (%c-loop-forever body)
   `((λ ()
       (define (loop) ,body (loop))
       (loop))))
+
+(defmacro (%c-allocate-struct size)
+  `(%-mem-alloc ,size))
+
+(defmacro (%c-struct-field ptr os size)
+  `(%c-cast-int->ptr (+ (%c-cast-ptr->int ,ptr) ,os)))
+
+(defmacro (%c-word-read ptr)
+  `(%-mem-read ,ptr 0))
+
+(defmacro (%c-word-write! ptr val)
+  `(%-mem-write! ,ptr 0 ,val))
+
+(defmacro (%c-cast-ptr->int ptr)
+  `(%-box ,ptr))
+
+(defmacro (%c-cast-int->ptr int)
+  `(%-word->pointer ,int))
+
+(defmacro (%c-word-opright x y) y)

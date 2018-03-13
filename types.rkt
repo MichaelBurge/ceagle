@@ -63,6 +63,7 @@
 
 (struct c-field-info ([ offset : Integer ] [ size : Integer ]) #:transparent)
 
+(define-type c-value-type (U 'lvalue 'rvalue))
 (define-type c-statements (Listof c-statement))
 (define-type c-modifiers (Listof c-modifier))
 (define-type c-declarations (Listof c-declaration))
