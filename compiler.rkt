@@ -58,10 +58,12 @@
   (define (expression-type exp)
     (define t-uint (c-type-fixed #f 256))
     (define t-int  (c-type-fixed #t 256))
+    (define macro-type (c-signature t-uint '()))
     (match exp
       [(struct c-const ((? exact-positive-integer?))) t-uint]
       [(struct c-const ((? exact-integer?)))          t-int]
-      [(struct c-variable (name))                     (hash-ref (*variables*) name (λ () (error "expression-type: Unknown variable" name)))]
+      [(struct c-variable (name))
+       (hash-ref (*variables*) name (λ () macro-type))]
       [(struct c-ternary (_ cons _)) (expression-type cons)]
       [(struct c-binop (_ left _)) (expression-type left)]
       [(struct c-unop (_ exp)) (expression-type exp)]
@@ -90,11 +92,10 @@
     (pyr-begin (map compile-declaration x-decls)))
   (define call-main
     (c-function-call (c-variable 'main) (list)))
-  (pyr-begin
-   (listof
-    (expand-pyramid `(include ceagle "builtins.pmd"))
-    decls
-    (compile-expression call-main 'rvalue))))
+  (quasiquote-pyramid
+   `(begin (include ceagle "builtins.pmd")
+           ,decls
+           (%-box ,(compile-expression call-main 'rvalue)))))
 
 (: compile-declaration (-> c-declaration Pyramid))
 (define (compile-declaration x)
@@ -108,17 +109,22 @@
 (define (compile-decl-var x)
   (destruct c-decl-var x)
   (register-variable! x-name x-type)
-  (pyr-definition x-name
-                  (if x-init
-                      (compile-expression x-init)
-                      (compile-default-initializer x-type))))
+  (quasiquote-pyramid
+   `(begin (define ,(pyr-const x-name) (%c-allocate-struct ,(pyr-const (type-size x-type))))
+           (%c-noinline ,(pyr-const x-name)) ; TODO: The simplifier tries to inline constants like (define x 5) that are later modified.
+           (%c-word-write! ,(pyr-const x-name)
+                           ,(if x-init
+                                (compile-expression x-init 'rvalue)
+                                (compile-default-initializer x-type)))
+           )))
+
 
 (: compile-default-initializer (-> c-type Pyramid))
 (define (compile-default-initializer ty)
   (match ty
-    [(struct c-type-fixed _) (pyr-const 0)]
+    [(struct c-type-fixed _) (expand-pyramid `(%-unbox 0))]
     [(struct c-type-alias _) (compile-default-initializer (resolve-type ty))]
-    [(struct c-type-struct _) (quasiquote-pyramid `(%c-allocate-struct ,(pyr-const (type-size ty))))]
+    [(struct c-type-struct _) (expand-pyramid `(%-unbox 0))] ; TODO: This doesn't initialize the whole struct.
     ))
 
 (: compile-decl-type (-> c-decl-type Pyramid))
@@ -133,6 +139,7 @@
   (destruct c-signature x-sig)
   (: vars VariableNames)
   (define vars (map c-sigvar-name x-sig-args))
+  (register-variable! x-name x-sig)
   (expand-pyramid
    `(define (,x-name ,@vars)
       ,(shrink-pyramid
@@ -179,22 +186,20 @@
 (define (compile-const x val-ty)
   (match val-ty
     ['lvalue (error "compile-const: A constant cannot be an lvalue" x)]
-    ['rvalue (pyr-const (c-const-value x))]
+    ['rvalue (quasiquote-pyramid `(%-unbox ,(pyr-const (c-const-value x))))]
     ))
 
 (: compile-variable (-> c-variable c-value-type Pyramid))
 (define (compile-variable x val-ty)
   (define exp (pyr-variable (c-variable-name x)))
-  (match val-ty
-    ['rvalue exp]
-    ['lvalue
-     (let ([ exp-ty (resolve-type (expression-type x))])
-       (match exp-ty
-         [(struct c-type-fixed  _) (quasiquote-pyramid `(%-fixnum-lvalue ,exp))]
-         [(struct c-type-struct _) exp]
-         [(struct c-type-alias  _) (error "compile-variable: Unexpected case" x val-ty exp-ty)]
-         [_                        (error "compile-variable: Unknown case")]))]
-    [_ (error "compile-variable: Unknown case" x)]
+  (define exp-ty (resolve-type (expression-type x)))
+  (match* (val-ty exp-ty)
+    [('rvalue (struct c-signature _))  exp]
+    [('rvalue (struct c-type-fixed _)) (quasiquote-pyramid `(%c-word-read ,exp))]
+    [('rvalue _)                       (error "compile-variable: Unhandled case" exp-ty)]
+    [('lvalue (struct c-type-fixed _)) exp]
+    [('lvalue (struct c-type-struct _)) exp]
+    [('lvalue _) (error "compile-variable: Unhandled case" val-ty exp-ty)]
     ))
 
 (: compile-ternary (-> c-ternary c-value-type Pyramid))
@@ -207,20 +212,26 @@
 (: compile-binop (-> c-binop c-value-type Pyramid))
 (define (compile-binop x val-ty)
   (destruct c-binop x)
-  (define left-val-ty (if (wants-lvalue? x-op)
-                          'lvalue
-                          'rvalue))
-  (pyr-application (op->builtin x-op)
-                   (list (compile-expression x-left  left-val-ty)
-                         (compile-expression x-right 'rvalue))))
+  (define rvalue-exp (pyr-application (op->builtin x-op)
+                                      (list (compile-expression x-left 'rvalue)
+                                            (compile-expression x-right 'rvalue)
+                                            )))
+  (if (wants-lvalue? x-op)
+      (pyr-application (pyr-variable '%c-word-write!)
+                       (list (compile-expression x-left 'lvalue)
+                             rvalue-exp))
+      rvalue-exp))
 
 (: compile-unop (-> c-unop c-value-type Pyramid))
 (define (compile-unop x val-ty)
   (destruct c-unop x)
-  (match val-ty
-    ['lvalue (error "compile-unop: Unary operators cannot be lvalues" x)]
-    ['rvalue (pyr-application (op->builtin x-op)
-                              (list (compile-expression x-exp val-ty)))]))
+  (define rvalue-exp (pyr-application (op->builtin x-op)
+                                      (list (compile-expression x-exp 'rvalue))))
+  (if (wants-lvalue? x-op)
+      (pyr-application (pyr-variable '%c-word-write!)
+                       (list (compile-expression x-exp 'lvalue)
+                             rvalue-exp))
+      rvalue-exp))
 
 (: compile-function-call (-> c-function-call c-value-type Pyramid))
 (define (compile-function-call x val-ty)
@@ -241,8 +252,8 @@
   (define ptr-exp
     (quasiquote-pyramid
      `(%c-struct-field ,(compile-expression x-source 'lvalue)
-                       ,(pyr-const info-offset)
-                       ,(pyr-const info-size))))
+                       (%-unbox ,(pyr-const info-offset))
+                       (%-unbox ,(pyr-const info-size)))))
   (match val-ty
     ['lvalue ptr-exp]
     ['rvalue (quasiquote-pyramid `(%c-word-read ,ptr-exp))]
@@ -260,8 +271,8 @@
         (let ([ hd (first cases) ]
               [ tl (rest  cases) ])
           (destruct c-switch-case hd)
-          (pyr-if (equal? (compile-expression hd-expected)
-                          (compile-expression sw-actual))
+          (pyr-if (equal? (compile-expression hd-expected 'rvalue)
+                          (compile-expression sw-actual 'rvalue))
                   (compile-statement hd-body)
                   (compile-cases tl)))))
   (with-breakpoint (compile-cases sw-cs)))
@@ -269,7 +280,7 @@
 (: compile-if          (-> c-if          Pyramid))
 (define (compile-if x)
   (destruct c-if x)
-  (pyr-if (compile-expression x-pred)
+  (pyr-if (compile-expression x-pred 'rvalue)
           (compile-statement  x-consequent)
           (compile-statement  x-alternative)
           ))
@@ -281,10 +292,10 @@
                    (compile-declaration x-init)
                    (pyr-begin (list))))
   (define post (if x-post
-                   (compile-expression x-post)
+                   (compile-expression x-post 'rvalue)
                    (pyr-begin (list))))
   (define pred (if x-pred
-                   (compile-expression x-pred)
+                   (compile-expression x-pred 'rvalue)
                    (pyr-const 1)))
 
   (with-breakpoint
@@ -311,7 +322,7 @@
     (with-continuepoint
       (quasiquote-pyramid
        `(begin ,x-body
-               (if ,(compile-expression x-pred)
+               (if ,(compile-expression x-pred 'rvalue)
                    (continue 0)
                    (break #f)))))))
 
@@ -396,7 +407,27 @@
 
 (: op->builtin (-> Symbol Pyramid))
 (define (op->builtin op)
-  (pyr-variable (symbol-append '%c-word-op op)))
+  (define rvalue-op
+    (match op
+      ['<<= '<<]
+      ['>>= '>>]
+      ['+=  '+]
+      ['-=  '-]
+      ['*=  '*]
+      ['/=  '/]
+      ['%=  '%]
+      ['\|\|= '\|\|]
+      ['\|= '\|]
+      ['^=  '^]
+      ['&&= '&&]
+      ['&=  '&]
+      ['=   'right]
+      ['++  '|+1|]
+      ['--  '|-1|]
+      [_    #f]))
+  (pyr-variable (symbol-append '%c-word-op (if rvalue-op rvalue-op op)))
+  )
+
 
 (: int->lvalue (-> Pyramid Pyramid))
 (define (int->lvalue x)
@@ -407,7 +438,8 @@
   `(%-unbox ,x))
 
 (: assign-ops (Setof Symbol))
-(define assign-ops (apply set '(<<= >>= += -= *= /= %= \|\|= \|= ^= &&= &= =)))
+;(define assign-ops (set))
+(define assign-ops (apply set '(<<= >>= += -= *= /= %= \|\|= \|= ^= &&= &= = ++ --)))
 
 (: wants-lvalue? (-> Symbol Boolean))
 (define (wants-lvalue? op)

@@ -13,9 +13,10 @@
 (struct c-type-struct-field ([ name : Symbol ] [ type : c-type ]) #:transparent)
 (struct c-type-struct ([ fs : c-type-struct-fields ]) #:transparent)
 (struct c-type-alias ([ name : Symbol ]) #:transparent)
+(struct c-signature ([ ret  : c-type ] [ args : c-sigvars ]) #:transparent)
 
 (define-type c-type-struct-fields (Listof c-type-struct-field))
-(define-type c-type (U c-type-fixed c-type-struct c-type-alias))
+(define-type c-type (U c-type-fixed c-type-struct c-type-alias c-signature))
 
 (struct c-unit  ([ decls : c-declarations ]) #:transparent)
 (struct c-decl-var  c-declaration ([ name : Symbol ] [ type : c-type ] [ init : (Maybe c-expression) ] [ mods : c-modifiers ]) #:transparent)
@@ -38,7 +39,7 @@
 (struct c-continue () #:transparent)
 
 (struct c-sigvar    ([ name : Symbol ] [ type : c-type   ]) #:transparent)
-(struct c-signature ([ ret  : c-type ] [ args : c-sigvars ]) #:transparent)
+
 (define-type c-statement (U c-label
                             c-expression-statement
                             c-switch

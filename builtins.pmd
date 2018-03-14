@@ -4,17 +4,18 @@
 (require psl "syntax.pmd")
 
 (defmacro (__builtin_set_test_result n)
-  `(set-test-result! ,n))
+  (match n
+    [`(%-unbox ,x) `(set-test-result! ,x)]
+    [_ (error "__builtin_set_test_result: Unknown case" n)]
+    ))
 
 (defmacro (%c-define-word-assign-unop assign-op base-op)
   `(defmacro (,assign-op x)
-     `(let ([ ptr ,x ])
-        (%c-word-write! ptr (,,base-op (%c-word-read ptr))))))
+     `(%c-word-write! ,x (,,base-op ,x))))
 
 (defmacro (%c-define-word-assign-binop assign-op base-op)
   `(defmacro (,assign-op x y)
-     `(let ([ ptr ,x ])
-        (%c-word-write! ptr (,,base-op (%c-word-read ptr) ,y)))))
+     `(%c-word-write! ,x (,,base-op ,x ,y))))
 
 ; Unary operators
 
@@ -26,13 +27,13 @@
 (%c-define-word-assign-binop %c-word-op*= '%c-word-op*)
 (%c-define-word-assign-binop %c-word-op=  '%c-word-opright)
 
-(defmacro (%c-word-op-1 x)  `(- ,x 1))
-(defmacro (%c-word-op+1 x)  `(+ ,x 1))
-(defmacro (%c-word-op* x y) `(* ,x ,y))
+(defmacro (%c-word-op-1 x)  `(%#-- ,x (%-unbox 1)))
+(defmacro (%c-word-op+1 x)  `(%#-+ ,x (%-unbox 1)))
+(defmacro (%c-word-op* x y) `(%#-* ,x ,y))
 
-(defmacro (%c-word-op== x y) `(= ,x ,y))
-(defmacro (%c-word-op> x y)  `(> ,x ,y))
-(defmacro (%c-word-op+ x y)  `(+ ,x ,y))
+(defmacro (%c-word-op== x y) `(%#-= ,x ,y))
+(defmacro (%c-word-op> x y)  `(%#-> ,x ,y))
+(defmacro (%c-word-op+ x y)  `(%#-+ ,x ,y))
 
 ; Other utilities
 
@@ -41,22 +42,20 @@
       (define (loop) ,body (loop))
       (loop))))
 
+(defmacro (%c-allocate-fixnum)
+  `(%#-mem-alloc (%-unbox WORD)))
+
 (defmacro (%c-allocate-struct size)
-  `(%-mem-alloc ,size))
+  `(%#-mem-alloc (%-unbox ,size)))
 
 (defmacro (%c-struct-field ptr os size)
-  `(%c-cast-int->ptr (+ (%c-cast-ptr->int ,ptr) ,os)))
+  `(%#-+ ,ptr ,os))
 
 (defmacro (%c-word-read ptr)
-  `(%-mem-read ,ptr 0))
+  `(%#-mem-read ,ptr (%-unbox 0)))
 
 (defmacro (%c-word-write! ptr val)
-  `(%-mem-write! ,ptr 0 ,val))
-
-(defmacro (%c-cast-ptr->int ptr)
-  `(%-box ,ptr))
-
-(defmacro (%c-cast-int->ptr int)
-  `(%-word->pointer ,int))
-
+  `(%#-mem-write! ,ptr (%-unbox 0) ,val))
 (defmacro (%c-word-opright x y) y)
+
+(defmacro (%c-noinline var) `(set! ,var ,var))
