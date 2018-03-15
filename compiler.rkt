@@ -12,7 +12,10 @@
 (module typechecker typed/racket
   (require "types.rkt")
   (require/typed racket/hash
-    [ hash-union (-> (HashTable Symbol c-type) (HashTable Symbol c-type) [#:combine/key (-> Symbol c-type c-type c-type)] (HashTable Symbol c-type))])
+    [ hash-union! (-> (HashTable Symbol c-type) (HashTable Symbol c-type) [#:combine/key (-> Symbol c-type c-type c-type)] Void)]
+    [ hash-union (-> (HashTable Symbol c-type) (HashTable Symbol c-type) [#:combine/key (-> Symbol c-type c-type c-type)] (HashTable Symbol c-type))]
+    )
+
   (require pyramid/utils)
 
   (provide (all-defined-out))
@@ -33,9 +36,10 @@
 
   (: with-function-scope (All (A) (-> c-signature (-> A) A)))
   (define (with-function-scope sig f)
-    (parameterize ([ *variables* (hash-union (*variables*)
-                                             (signature->variable-table sig)
-                                             #:combine/key (λ ([ k : Symbol ] [v0 : c-type] [v : c-type]) v))])
+    (parameterize ([ *variables* (hash-copy (*variables*))])
+      (hash-union! (*variables*)
+                   (signature->variable-table sig)
+                   #:combine/key (λ ([ k : Symbol ] [v0 : c-type] [v : c-type]) v))
       (f)))
 
   (: signature->variable-table (-> c-signature variable-table))
@@ -137,14 +141,20 @@
 (define (compile-decl-func x)
   (destruct c-decl-func x)
   (destruct c-signature x-sig)
+  (define (sigvar-init v) (symbol-append (c-sigvar-name v)
+                                         '-init))
   (: vars VariableNames)
-  (define vars (map c-sigvar-name x-sig-args))
+  (define vars (map sigvar-init x-sig-args))
   (register-variable! x-name x-sig)
-  (expand-pyramid
-   `(define (,x-name ,@vars)
-      ,(shrink-pyramid
-        (with-returnpoint
-          (compile-statement x-body))))))
+  (with-function-scope x-sig
+    (λ ()
+      (expand-pyramid
+       `(define (,x-name ,@vars)
+          ,@(for/list ([ arg x-sig-args ])
+              `(%c-define-arg ,(c-sigvar-name arg) ,(sigvar-init arg)))
+          ,(shrink-pyramid
+            (with-returnpoint
+              (compile-statement x-body))))))))
 
 (: compile-statement (-> c-statement Pyramid))
 (define (compile-statement x)
@@ -217,9 +227,11 @@
                                             (compile-expression x-right 'rvalue)
                                             )))
   (if (wants-lvalue? x-op)
-      (pyr-application (pyr-variable '%c-word-write!)
-                       (list (compile-expression x-left 'lvalue)
-                             rvalue-exp))
+      (quasiquote-pyramid
+       `(let ([ value ,rvalue-exp ])
+          (begin (%c-word-write! ,(compile-expression x-left 'lvalue)
+                                 value)
+                 value)))
       rvalue-exp))
 
 (: compile-unop (-> c-unop c-value-type Pyramid))
@@ -228,9 +240,10 @@
   (define rvalue-exp (pyr-application (op->builtin x-op)
                                       (list (compile-expression x-exp 'rvalue))))
   (if (wants-lvalue? x-op)
-      (pyr-application (pyr-variable '%c-word-write!)
-                       (list (compile-expression x-exp 'lvalue)
-                             rvalue-exp))
+      (quasiquote-pyramid
+       `(let ([ value ,rvalue-exp ])
+          (%c-word-write! ,(compile-expression x-exp 'lvalue) value)
+          value))
       rvalue-exp))
 
 (: compile-function-call (-> c-function-call c-value-type Pyramid))

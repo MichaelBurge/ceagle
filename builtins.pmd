@@ -59,3 +59,8 @@
 (defmacro (%c-word-opright x y) y)
 
 (defmacro (%c-noinline var) `(set! ,var ,var))
+
+(defmacro (%c-define-arg name init)
+  `(begin (define ,name (%c-allocate-fixnum))
+          (%c-noinline ,name)
+          (%c-word-write! ,name ,init)))
