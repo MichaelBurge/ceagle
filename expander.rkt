@@ -10,9 +10,19 @@
 
 (define (expand-declaration x)
   (match x
-    [`(function_declaration ,mods ,ret-type ,name ,body) (c-decl-func (string->symbol name) (c-signature (expand-type ret-type) '()) (expand-statement body))]
-    [`(typedef ,ty ,name) (c-decl-type (string->symbol name) (expand-type ty))]
-     [_ (error "expand-declaration: Unknown syntax" x)]))
+    [`(function_declaration ,mods ,ret-type ,name ,args ,body)
+     (c-decl-func (string->symbol name)
+                  (c-signature (expand-type ret-type)
+                               (map expand-argument args))
+                  (expand-statement body))]
+    [`(function_declaration ,mods ,ret-type ,name ,body)
+     (c-decl-func (string->symbol name)
+                  (c-signature (expand-type ret-type) '())
+                  (expand-statement body))]
+    [`(typedef ,ty ,name) (c-decl-type (string->symbol name)
+                                       (expand-type ty))]
+    [_ (error "expand-declaration: Unknown syntax" x)]
+    ))
 
 (define (expand-statement x)
   (match x
@@ -77,3 +87,9 @@
     [`(declaration ,ty (declaration_variable (variable ,name) ,init))
      (c-type-struct-field (string->symbol name) (expand-type ty))]
     [_ (error "expand-struct-field: Unknown syntax" x)]))
+
+(define (expand-argument x)
+  (match x
+    [`(function_argument ,type (variable ,name)) (c-sigvar (string->symbol name) (expand-type type))]
+    [_ (error "expand-argument: Unknown syntax" x)]
+    ))
