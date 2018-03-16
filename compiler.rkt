@@ -9,6 +9,24 @@
 
 (provide compile-c)
 
+#|
+Compilation strategy
+* Flow control such as break, continue, or return are implemented by creating and calling continuations.
+* Expressions always resolve to a result, and can also have an associated location.
+** An rvalue is an expression that is compiled to emit a result
+** An lvalue is an expression that is compiled to emit a location
+** Some expressions such as constants or non-modifying binary operators are not lvalues
+** rvalues and lvalues always fit inside a single machine word, simplifying parameter and return passing.
+** Rules for converting expression values to rvalues and lvalues:
+*** The rvalue of a machine word is that word. The lvalue is the address where such a word is stored.
+*** The rvalue and the lvalue of a struct are both pointers. Ceagle does not attempt to generate local bytestrings.
+**** However, the rvalue of a struct allocates and copies into a new struct, so the pointers are not equal.
+*** The rvalue of a function is the code pointer for it. An lvalue is the address where such a code pointer is stored.
+* Variables are always initialized with an rvalue
+* Parameters are always passed as rvalues
+* Return values are passed as rvalues
+|#
+
 (module typechecker typed/racket
   (require "types.rkt")
   (require/typed racket/hash
@@ -85,6 +103,7 @@
       [(struct c-type-struct (fields)) (for/sum ([ field fields ])
                                          (type-size (c-type-struct-field-type field)))]
       [(struct c-type-alias _) (type-size (resolve-type x))]
+      [(struct c-signature _) 32]
       [_ (error "type-size: Unknown case" x)]))
   )
 (require 'typechecker)
@@ -114,21 +133,27 @@
   (destruct c-decl-var x)
   (register-variable! x-name x-type)
   (quasiquote-pyramid
-   `(begin (define ,(pyr-const x-name) (%c-allocate-struct ,(pyr-const (type-size x-type))))
-           (%c-noinline ,(pyr-const x-name)) ; TODO: The simplifier tries to inline constants like (define x 5) that are later modified.
-           (%c-word-write! ,(pyr-const x-name)
-                           ,(if x-init
-                                (compile-expression x-init 'rvalue)
-                                (compile-default-initializer x-type)))
-           )))
+   `(,(pyr-const (variable-definer x-type))
+     ,(pyr-const x-name)
+     ,(if x-init
+          (compile-expression x-init 'rvalue)
+          (compile-default-initializer x-type))
+     )))
 
+(: variable-definer (-> c-type Symbol))
+(define (variable-definer ty)
+  (match ty
+    [(struct c-type-fixed _) '%c-define-fixnum]
+    [(struct c-type-struct _) '%c-define-struct]
+    [(struct c-type-alias _) (variable-definer (resolve-type ty))]
+    [_ (error "compile-decl-var: Unhandled case" ty)]))
 
 (: compile-default-initializer (-> c-type Pyramid))
 (define (compile-default-initializer ty)
   (match ty
     [(struct c-type-fixed _) (expand-pyramid `(%-unbox 0))]
     [(struct c-type-alias _) (compile-default-initializer (resolve-type ty))]
-    [(struct c-type-struct _) (expand-pyramid `(%-unbox 0))] ; TODO: This doesn't initialize the whole struct.
+    [(struct c-type-struct _) (quasiquote-pyramid `(%c-allocate-struct ,(pyr-const (type-size ty))))]
     ))
 
 (: compile-decl-type (-> c-decl-type Pyramid))
@@ -203,13 +228,17 @@
 (define (compile-variable x val-ty)
   (define exp (pyr-variable (c-variable-name x)))
   (define exp-ty (resolve-type (expression-type x)))
+  (define size (pyr-const (type-size exp-ty)))
   (match* (val-ty exp-ty)
     [('rvalue (struct c-signature _))  exp]
     [('rvalue (struct c-type-fixed _)) (quasiquote-pyramid `(%c-word-read ,exp))]
-    [('rvalue _)                       (error "compile-variable: Unhandled case" exp-ty)]
+    [('rvalue (struct c-type-struct _))
+     (quasiquote-pyramid
+      `(let ([ copy (%c-allocate-struct ,size)])
+         (%c-struct-copy (%-unbox ,size) ,exp copy)))]
     [('lvalue (struct c-type-fixed _)) exp]
     [('lvalue (struct c-type-struct _)) exp]
-    [('lvalue _) (error "compile-variable: Unhandled case" val-ty exp-ty)]
+    [(_ _)    (error "compile-variable: Unhandled case" val-ty exp-ty)]
     ))
 
 (: compile-ternary (-> c-ternary c-value-type Pyramid))

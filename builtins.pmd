@@ -64,3 +64,16 @@
   `(begin (define ,name (%c-allocate-fixnum))
           (%c-noinline ,name)
           (%c-word-write! ,name ,init)))
+
+(defmacro (%c-struct-copy size from to)
+  `(%#-memcpy ,to ,from ,size))
+
+(defmacro (%c-define-fixnum name init)
+  `(begin (define ,name (let ([ ptr (%c-allocate-fixnum) ])
+                          (%c-word-write! ptr ,init)
+                          ptr))
+          (%c-noinline ,name)))
+
+(defmacro (%c-define-struct name init)
+  `(begin (define ,name ,init)
+          (%c-noinline ,name)))
