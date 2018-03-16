@@ -29,11 +29,14 @@
 
 (defmacro (%c-word-op-1 x)  `(%#-- ,x (%-unbox 1)))
 (defmacro (%c-word-op+1 x)  `(%#-+ ,x (%-unbox 1)))
+(defmacro (%c-word-opdereference x) x)
+
 (defmacro (%c-word-op* x y) `(%#-* ,x ,y))
 
 (defmacro (%c-word-op== x y) `(%#-= ,x ,y))
 (defmacro (%c-word-op> x y)  `(%#-> ,x ,y))
 (defmacro (%c-word-op+ x y)  `(%#-+ ,x ,y))
+
 
 ; Other utilities
 

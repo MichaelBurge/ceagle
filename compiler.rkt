@@ -269,12 +269,16 @@ Compilation strategy
   (destruct c-unop x)
   (define rvalue-exp (pyr-application (op->builtin x-op)
                                       (list (compile-expression x-exp 'rvalue))))
-  (if (wants-lvalue? x-op)
-      (quasiquote-pyramid
-       `(let ([ value ,rvalue-exp ])
-          (%c-word-write! ,(compile-expression x-exp 'lvalue) value)
-          value))
-      rvalue-exp))
+  (match x-op
+    ['& (compile-expression x-exp 'lvalue)]
+    ['* (compile-expression x-exp val-ty)]
+    [(? wants-lvalue?)
+     (quasiquote-pyramid
+      `(let ([ value ,rvalue-exp ])
+         (%c-word-write! ,(compile-expression x-exp 'lvalue) value)
+         value))]
+    [_ rvalue-exp]
+    ))
 
 (: compile-function-call (-> c-function-call c-value-type Pyramid))
 (define (compile-function-call x val-ty)

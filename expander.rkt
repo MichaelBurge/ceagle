@@ -42,10 +42,14 @@
     [`(return ,x)                   (c-return (expand-expression x))]
     [`(break)                       (c-break)]
     [`(continue)                    (c-continue)]
-    [`(declaration ,ty (declaration_variable (variable ,name)))
-     (c-decl-var (string->symbol name) (expand-type ty) #f '())]
-    [`(declaration ,ty (declaration_variable (variable ,name) ,init))
-     (c-decl-var (string->symbol name) (expand-type ty) (expand-expression init) '())]
+    [`(declaration ,ty (declaration_variable (variable (variable_modifier ,mod) ... ,name) ,init ...))
+     (let ([ init-exp (if (null? init)
+                          #f
+                          (expand-expression (first init)))]
+           [ mod-exp (map string->symbol mod)])
+       (c-decl-var (string->symbol name) (expand-type ty) init-exp mod-exp))]
+    ;; [`(declaration ,ty (declaration_variable (variable ,name) ,init))
+    ;;  (c-decl-var (string->symbol name) (expand-type ty) (expand-expression init) '())]
     [`(empty)                       (c-block '())]
     [`(sequence . ,xs)              (c-block (map expand-statement xs))]
     [_ (error "expand-statement: Unknown syntax" x)]
@@ -57,6 +61,7 @@
     [`(integer ,val)                        (c-const val)]
     [`(char ,val)                           (c-const (string-ref val 0))]
     [`(variable ,name)                      (c-variable (string->symbol name))]
+    [`(variable (variable_modifier "*") ,name) (c-unop 'dereference (c-variable (string->symbol name)))]
     [`(ternary ,pred ,cons ,alt)            (c-ternary (expand-expression pred) (expand-expression cons) (expand-expression alt))]
     [`(binop ,left "." (variable ,right))   (c-field-access (expand-expression left) (string->symbol right))]
     [`(binop ,left ,op ,right)              (c-binop (string->symbol op) (expand-expression left) (expand-expression right))]

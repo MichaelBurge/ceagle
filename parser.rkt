@@ -64,6 +64,7 @@ function_argument: type variable
 | "-"
 | "!"
 | "*"
+| "&"
 
 @postop_op: "++" | "--"
 

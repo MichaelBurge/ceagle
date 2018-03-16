@@ -22,7 +22,7 @@
 (struct c-decl-var  c-declaration ([ name : Symbol ] [ type : c-type ] [ init : (Maybe c-expression) ] [ mods : c-modifiers ]) #:transparent)
 (struct c-decl-type c-declaration ([ name : Symbol ] [ type : c-type ]) #:transparent)
 (struct c-decl-func c-declaration ([ name : Symbol ] [ sig : c-signature ] [ body : c-statement ]) #:transparent)
-(define-type c-modifier (U 'extern 'static))
+(define-type c-modifier (U 'extern 'static '*))
 
 (struct c-label       ([ name : Symbol ]) #:transparent)
 (struct c-expression-statement ([ exp : c-expression ]) #:transparent)
