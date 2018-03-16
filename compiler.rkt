@@ -271,13 +271,21 @@ Compilation strategy
                                       (list (compile-expression x-exp 'rvalue))))
   (match x-op
     ['& (compile-expression x-exp 'lvalue)]
-    ['* (compile-expression x-exp val-ty)]
+    ['dereference (compile-dereference x-exp val-ty)]
     [(? wants-lvalue?)
      (quasiquote-pyramid
       `(let ([ value ,rvalue-exp ])
          (%c-word-write! ,(compile-expression x-exp 'lvalue) value)
          value))]
     [_ rvalue-exp]
+    ))
+
+(: compile-dereference (-> c-expression c-value-type Pyramid))
+(define (compile-dereference exp ty)
+  (define rval (compile-expression exp 'rvalue))
+  (match ty
+    ['lvalue rval]
+    ['rvalue (quasiquote-pyramid `(%c-word-opdereference ,rval))]
     ))
 
 (: compile-function-call (-> c-function-call c-value-type Pyramid))
