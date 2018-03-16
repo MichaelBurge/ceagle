@@ -55,7 +55,7 @@
   (match x
     [`(function_call ,operator . ,operands) (c-function-call (expand-expression operator) (map expand-expression operands))]
     [`(integer ,val)                        (c-const val)]
-    [`(char ,val)                           (c-const val)]
+    [`(char ,val)                           (c-const (string-ref val 0))]
     [`(variable ,name)                      (c-variable (string->symbol name))]
     [`(ternary ,pred ,cons ,alt)            (c-ternary (expand-expression pred) (expand-expression cons) (expand-expression alt))]
     [`(binop ,left "." (variable ,right))   (c-field-access (expand-expression left) (string->symbol right))]
@@ -74,6 +74,8 @@
 
 (define (expand-type x)
   (match x
+    ['(signed_char)            (c-type-fixed #t 8)]
+    ['(unsigned_char)          (c-type-fixed #f 8)]
     ['(signed_int)             (c-type-fixed #t 256)]
     ['(unsigned_int)           (c-type-fixed #f 256)]
     [`(struct ,name . ,fields) (c-type-struct (map expand-struct-field fields))]

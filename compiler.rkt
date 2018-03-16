@@ -91,6 +91,7 @@ Compilation strategy
       [(struct c-unop (_ exp)) (expression-type exp)]
       [(struct c-function-call _) (error "expression-type: Unimplemented function call" exp)]
       [(struct c-field-access _) (error "expression-type: Unimplemented field access" exp)]
+      [_ (error "expression-type: Unhandled case" exp)]
       ))
 
   (: bits->bytes (-> Integer Integer))

@@ -29,8 +29,8 @@
    [(:: "0x" (:+ hex))       (token 'INTEGER (string->number (substring lexeme 2) 16))]
    [(:: (:+ numeric)  "ULL") (token 'INTEGER (string->number (substring lexeme 0 (- (string-length lexeme) 3))))]
    [(:+ numeric)             (token 'INTEGER (string->number lexeme))]
-   [(:: "'" (char-complement "'") "'") (token 'CHAR (substring lexeme 1 2))]
-   ["'\\''"                  (token 'CHAR "'")]
+   [(:: "'" (char-complement "'") "'") (token 'ONECHAR (substring lexeme 1 2))]
+   ["'\\''"                  (token 'ONECHAR "'")]
    [(:: "\""                 (:* (char-complement "\"")) "\"") (token 'STRING lexeme)]
    ; Punctuation
    ["{"  (operator 'LCURLY )]
@@ -44,12 +44,12 @@
    [":"  (operator 'COLON  )]
    ["'"  (operator 'SQUOTE )]
    ["\"" (operator 'DQUOTE )]
-   ; Operators 
+   ; Operators
    [(:or "?" "<<=" ">>=" "+=" "-=" "*=" "/=" "%=" "||="
          "|=" "^=" "&&=" "&=" "~=" "++" "--" "<<" ">>" "+"
          "-"  "*"  "/"   "%"  "||" "|"  "^"  "&&" "&"  "~"
          "!=" "!"  "<="  "<"  ">=" ">"  "==" "=" "->" ".") lexeme]
-   
+
    ; Keywords
    ["typedef"  (token 'TYPEDEF )]
    ["struct"   (token 'STRUCT  )]
@@ -76,7 +76,7 @@
    ["static"   (token 'STATIC  )]
    [identifier (token 'IDENTIFIER lexeme)]
    ))
-   
+
 (define (make-tokenizer ip)
   (port-count-lines! ip)
   (define (next-token)

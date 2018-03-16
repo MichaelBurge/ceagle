@@ -2,7 +2,7 @@
 
 (provide (all-defined-out))
 
-(define-type CValue (U Integer String))
+(define-type CValue (U Integer String Char))
 
 (define-type (Maybe A) (U A #f))
 

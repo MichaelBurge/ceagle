@@ -4,7 +4,7 @@ c: top_level_declaration*
 
 @top_level_declaration: declaration | type_declaration | function_declaration
 
-declaration: 
+declaration:
   type (declaration_variable COMMA)* declaration_variable /SEMI
 | union /SEMI
 
@@ -83,7 +83,7 @@ function_argument: type variable
 | c_cast
 
 integer: INTEGER
-char: CHAR
+char: ONECHAR
 variable: [variable_modifier] identifier
 variable_modifier: "*"
 ternary: expression /"?" expression /COLON expression
@@ -144,11 +144,10 @@ union: /UNION [ identifier ] /LCURLY declaration* /RCURLY [ identifier* ]
 | /CONST type
 
 @identifier: IDENTIFIER
-unsigned_char: /UNSIGNED /CHAR
+unsigned_char: /UNSIGNED /CHAR | /CHAR
 unsigned_int: /UNSIGNED /INT
-signed_char: /CHAR
-signed_int: /INT
+signed_char: /SIGNED /CHAR
+signed_int: /SIGNED /INT | /INT
 void: /VOID
 
 typedef: /TYPEDEF type identifier /SEMI
-
