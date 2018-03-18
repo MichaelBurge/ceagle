@@ -22,7 +22,9 @@ static: /STATIC
 
 function_argument: type variable
 
-@binop_op:
+@ambiguous_binop_op: "*"
+
+@unambiguous_binop_op:
   "."
 | "->"
 | "<<="
@@ -41,7 +43,6 @@ function_argument: type variable
 | ">>"
 | "+"
 | "-"
-| "*"
 | "/"
 | "%"
 | "||"
@@ -56,6 +57,8 @@ function_argument: type variable
 | ">"
 | "=="
 | "="
+
+@binop_op: ambiguous_binop_op | unambiguous_binop_op
 
 @unop_op:
   "++"
@@ -75,13 +78,18 @@ function_argument: type variable
 | variable
 | /LPAREN expression /RPAREN
 
-@expression:
+@unambiguous_expression:
   simple_expression
 | ternary
 | unop
-| binop
+| binop_unambiguous
 | postop
 | c_cast
+
+@ambiguous_expression:
+  binop
+
+@expression: unambiguous_expression | ambiguous_expression
 
 integer: INTEGER
 char: ONECHAR
@@ -89,6 +97,7 @@ variable: [variable_modifier] identifier
 variable_modifier: "*"
 ternary: expression /"?" expression /COLON expression
 binop: expression binop_op expression
+binop_unambiguous: unambiguous_expression unambiguous_binop_op ambiguous_expression
 unop: unop_op expression
 postop: expression postop_op
 function_call: simple_expression /LPAREN [(expression /COMMA)* expression] /RPAREN
@@ -100,7 +109,6 @@ sequence: statement*
 
 @statement:
   label_definition
-| expression_statement
 | switch
 | if
 | for
@@ -112,6 +120,7 @@ sequence: statement*
 | break
 | continue
 | declaration
+| expression_statement
 | empty
 
 expression_statement: expression /SEMI
@@ -143,6 +152,7 @@ union: /UNION [ identifier ] /LCURLY declaration* /RCURLY [ identifier* ]
 | union
 | identifier
 | /CONST type
+| type /"*"
 
 @identifier: IDENTIFIER
 unsigned_char: /UNSIGNED /CHAR | /CHAR

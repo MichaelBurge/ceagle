@@ -1,4 +1,4 @@
-#lang typed/racket/no-check
+#lang typed/racket
 
 (require "types.rkt")
 (require (submod pyramid/types ast))
@@ -84,15 +84,30 @@ Compilation strategy
     (match exp
       [(struct c-const ((? exact-positive-integer?))) t-uint]
       [(struct c-const ((? exact-integer?)))          t-int]
-      [(struct c-variable (name))
-       (hash-ref (*variables*) name (λ () macro-type))]
+      [(struct c-variable (name)) (hash-ref (*variables*) name (λ () (error "expression-type: Unknown variable" name (*variables*))))]
       [(struct c-ternary (_ cons _)) (expression-type cons)]
       [(struct c-binop (_ left _)) (expression-type left)]
+      [(struct c-unop ('* exp))
+       (match (expression-type exp)
+         [(struct c-type-pointer (x)) x]
+         [ty (error "expression-type: Attempted to dereference a non-pointer" ty exp)])]
       [(struct c-unop (_ exp)) (expression-type exp)]
       [(struct c-function-call _) (error "expression-type: Unimplemented function call" exp)]
-      [(struct c-field-access _) (error "expression-type: Unimplemented field access" exp)]
+      [(struct c-field-access (source name))
+       (match (resolve-type (expression-type source))
+         [(struct c-type-struct (fields))
+          (match (assoc name (map (λ ([ f : c-type-struct-field ]) (cons (c-type-struct-field-name f)
+                                               (c-type-struct-field-type f)))
+                                  fields))
+            [#f (error "expression-type: No field with name found" source name)]
+            [(cons _ (? c-type? ty)) ty])]
+         [ ty (error "expression-type: Attempted to access a field from a non-struct" ty source name)])]
       [_ (error "expression-type: Unhandled case" exp)]
       ))
+
+  (: pointer-expression? (-> c-expression Boolean))
+  (define (pointer-expression? x)
+    (c-type-pointer? (expression-type x)))
 
   (: bits->bytes (-> Integer Integer))
   (define (bits->bytes x) (quotient x 8))
@@ -105,6 +120,7 @@ Compilation strategy
                                          (type-size (c-type-struct-field-type field)))]
       [(struct c-type-alias _) (type-size (resolve-type x))]
       [(struct c-signature _) 32]
+      [(struct c-type-pointer _) 32]
       [_ (error "type-size: Unknown case" x)]))
   )
 (require 'typechecker)
@@ -112,14 +128,13 @@ Compilation strategy
 (: compile-c (-> c-unit Pyramid))
 (define (compile-c x)
   (destruct c-unit x)
-  (define decls
-    (pyr-begin (map compile-declaration x-decls)))
-  (define call-main
-    (c-function-call (c-variable 'main) (list)))
-  (quasiquote-pyramid
-   `(begin (include ceagle "builtins.pmd")
-           ,decls
-           (%-box ,(compile-expression call-main 'rvalue)))))
+  (register-builtins!)
+  (let ([ decls     (pyr-begin (map compile-declaration x-decls)) ]
+        [ call-main (c-function-call (c-variable 'main) (list))])
+    (quasiquote-pyramid
+     `(begin (include ceagle "builtins.pmd")
+             ,decls
+             (%-box ,(compile-expression call-main 'rvalue))))))
 
 (: compile-declaration (-> c-declaration Pyramid))
 (define (compile-declaration x)
@@ -147,7 +162,8 @@ Compilation strategy
     [(struct c-type-fixed _) '%c-define-fixnum]
     [(struct c-type-struct _) '%c-define-struct]
     [(struct c-type-alias _) (variable-definer (resolve-type ty))]
-    [_ (error "compile-decl-var: Unhandled case" ty)]))
+    [(struct c-type-pointer _) '%c-define-pointer]
+    [_ (error "variable_definer: Unhandled case" ty)]))
 
 (: compile-default-initializer (-> c-type Pyramid))
 (define (compile-default-initializer ty)
@@ -167,6 +183,7 @@ Compilation strategy
 (define (compile-decl-func x)
   (destruct c-decl-func x)
   (destruct c-signature x-sig)
+  (: sigvar-init (-> c-sigvar VariableName))
   (define (sigvar-init v) (symbol-append (c-sigvar-name v)
                                          '-init))
   (: vars VariableNames)
@@ -176,7 +193,7 @@ Compilation strategy
     (λ ()
       (expand-pyramid
        `(define (,x-name ,@vars)
-          ,@(for/list ([ arg x-sig-args ])
+          ,@(for/list : PyramidQs ([ arg x-sig-args ])
               `(%c-define-arg ,(c-sigvar-name arg) ,(sigvar-init arg)))
           ,(shrink-pyramid
             (with-returnpoint
@@ -216,6 +233,7 @@ Compilation strategy
     [(? c-unop?)          (compile-unop          x val-ty)]
     [(? c-function-call?) (compile-function-call x val-ty)]
     [(? c-field-access?)  (compile-field-access  x val-ty)]
+    [(? c-cast?)          (compile-cast          x val-ty)]
     [_                    (error "compile-expression: Unknown case" x)]))
 
 (: compile-const (-> c-const c-value-type Pyramid))
@@ -237,6 +255,7 @@ Compilation strategy
      (quasiquote-pyramid
       `(let ([ copy (%c-allocate-struct ,size)])
          (%c-struct-copy (%-unbox ,size) ,exp copy)))]
+    [('rvalue (struct c-type-pointer _)) (quasiquote-pyramid `(%c-word-read ,exp))]
     [('lvalue (struct c-type-fixed _)) exp]
     [('lvalue (struct c-type-struct _)) exp]
     [(_ _)    (error "compile-variable: Unhandled case" val-ty exp-ty)]
@@ -271,7 +290,7 @@ Compilation strategy
                                       (list (compile-expression x-exp 'rvalue))))
   (match x-op
     ['& (compile-expression x-exp 'lvalue)]
-    ['dereference (compile-dereference x-exp val-ty)]
+    ['* (compile-dereference x-exp val-ty)]
     [(? wants-lvalue?)
      (quasiquote-pyramid
       `(let ([ value ,rvalue-exp ])
@@ -283,6 +302,7 @@ Compilation strategy
 (: compile-dereference (-> c-expression c-value-type Pyramid))
 (define (compile-dereference exp ty)
   (define rval (compile-expression exp 'rvalue))
+  (assert exp pointer-expression?)
   (match ty
     ['lvalue rval]
     ['rvalue (quasiquote-pyramid `(%c-word-opdereference ,rval))]
@@ -294,7 +314,7 @@ Compilation strategy
   (match val-ty
     ['lvalue (error "compile-function-call: Function calls cannot be lvalues" x)]
     ['rvalue (pyr-application (compile-expression x-func 'rvalue)
-                              (map (λ (x) (compile-expression x 'rvalue))
+                              (map (λ ([ x : c-expression ]) (compile-expression x 'rvalue))
                                    x-args))]))
 
 (: compile-field-access (-> c-field-access c-value-type Pyramid))
@@ -302,17 +322,24 @@ Compilation strategy
   (destruct c-field-access x)
   (define ty (expression-type x-source))
   (define field-table (type-field-table ty))
-  (define info (hash-ref field-table x-name))
+  (define info (hash-ref field-table x-name (λ () (error "compile-field-access: Field not found" ty x))))
   (destruct c-field-info info)
   (define ptr-exp
     (quasiquote-pyramid
      `(%c-struct-field ,(compile-expression x-source 'lvalue)
                        (%-unbox ,(pyr-const info-offset))
                        (%-unbox ,(pyr-const info-size)))))
+
   (match val-ty
     ['lvalue ptr-exp]
     ['rvalue (quasiquote-pyramid `(%c-word-read ,ptr-exp))]
     ))
+
+(: compile-cast (-> c-cast c-value-type Pyramid))
+(define (compile-cast x val-ty)
+  (destruct c-cast x)
+  (compile-expression x-exp val-ty)
+  )
 
 (: compile-switch      (-> c-switch      Pyramid))
 (define (compile-switch sw)
@@ -376,7 +403,7 @@ Compilation strategy
   (with-breakpoint
     (with-continuepoint
       (quasiquote-pyramid
-       `(begin ,x-body
+       `(begin ,(compile-statement x-body)
                (if ,(compile-expression x-pred 'rvalue)
                    (continue 0)
                    (break #f)))))))
@@ -393,7 +420,10 @@ Compilation strategy
 (define (compile-return x)
   (destruct c-return x)
   (quasiquote-pyramid
-   `(return ,(compile-expression x-val 'rvalue))))
+   (match x-val
+     [ #f  `(return 0)]
+     [ (? c-expression? val) `(return ,(compile-expression val 'rvalue))]
+     )))
 
 (: compile-break       (-> c-break       Pyramid))
 (define (compile-break x)
@@ -441,6 +471,7 @@ Compilation strategy
     [(struct c-type-fixed _) (make-field-table)]
     [(struct c-type-alias _) (error "type-field-table: Unexpected case" ty)]
     [(struct c-type-struct (fs)) (struct-fields->field-table fs)]
+    [(struct c-type-pointer _) (make-field-table)]
     [x (error "type-field-table: Unknown case" x)]
     ))
 
@@ -483,15 +514,6 @@ Compilation strategy
   (pyr-variable (symbol-append '%c-word-op (if rvalue-op rvalue-op op)))
   )
 
-
-(: int->lvalue (-> Pyramid Pyramid))
-(define (int->lvalue x)
-  `(%-fixnum-lvalue ,x))
-
-(: int->rvalue (-> Pyramid Pyramid))
-(define (int->rvalue x)
-  `(%-unbox ,x))
-
 (: assign-ops (Setof Symbol))
 ;(define assign-ops (set))
 (define assign-ops (apply set '(<<= >>= += -= *= /= %= \|\|= \|= ^= &&= &= = ++ --)))
@@ -499,3 +521,9 @@ Compilation strategy
 (: wants-lvalue? (-> Symbol Boolean))
 (define (wants-lvalue? op)
   (set-member? assign-ops op))
+
+(: register-builtins! (-> Void))
+(define (register-builtins!)
+  (define t-int (c-type-fixed #t 256))
+  (register-variable! '__builtin_set_test_result (c-signature (c-type-void) (list (c-sigvar 'expected t-int))))
+  )

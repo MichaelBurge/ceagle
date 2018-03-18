@@ -42,14 +42,11 @@
     [`(return ,x)                   (c-return (expand-expression x))]
     [`(break)                       (c-break)]
     [`(continue)                    (c-continue)]
-    [`(declaration ,ty (declaration_variable (variable (variable_modifier ,mod) ... ,name) ,init ...))
+    [`(declaration ,ty (declaration_variable (variable (variable_modifier ,mods) ... ,name) ,init ...))
      (let ([ init-exp (if (null? init)
                           #f
-                          (expand-expression (first init)))]
-           [ mod-exp (map string->symbol mod)])
-       (c-decl-var (string->symbol name) (expand-type ty) init-exp mod-exp))]
-    ;; [`(declaration ,ty (declaration_variable (variable ,name) ,init))
-    ;;  (c-decl-var (string->symbol name) (expand-type ty) (expand-expression init) '())]
+                          (expand-expression (first init)))])
+       (c-decl-var (string->symbol name) (apply-mods (expand-type ty) mods) init-exp))]
     [`(empty)                       (c-block '())]
     [`(sequence . ,xs)              (c-block (map expand-statement xs))]
     [_ (error "expand-statement: Unknown syntax" x)]
@@ -61,12 +58,13 @@
     [`(integer ,val)                        (c-const val)]
     [`(char ,val)                           (c-const (string-ref val 0))]
     [`(variable ,name)                      (c-variable (string->symbol name))]
-    [`(variable (variable_modifier "*") ,name) (c-unop 'dereference (c-variable (string->symbol name)))]
+    [`(variable (variable_modifier "*") ,name) (c-unop '* (c-variable (string->symbol name)))]
     [`(ternary ,pred ,cons ,alt)            (c-ternary (expand-expression pred) (expand-expression cons) (expand-expression alt))]
     [`(binop ,left "." (variable ,right))   (c-field-access (expand-expression left) (string->symbol right))]
     [`(binop ,left ,op ,right)              (c-binop (string->symbol op) (expand-expression left) (expand-expression right))]
     [`(unop ,op ,exp)                       (c-unop (string->symbol op) (expand-expression exp))]
     [`(postop ,exp ,op)                     (c-unop (string->symbol op) (expand-expression exp))] ; TODO: Post-op should be different from unop.
+    [`(c_cast ,ty ,exp)                     (c-cast (expand-type ty) (expand-expression exp))]
     [_ (error "expand-expression: Unknown syntax" x)]
     ))
 
@@ -89,14 +87,22 @@
 
 (define (expand-struct-field x)
   (match x
-    [`(declaration ,ty (declaration_variable (variable ,name)))
-     (c-type-struct-field (string->symbol name) (expand-type ty))]
-    [`(declaration ,ty (declaration_variable (variable ,name) ,init))
-     (c-type-struct-field (string->symbol name) (expand-type ty))]
+    [`(declaration ,ty (declaration_variable (variable (variable_modifier ,mods) ... ,name)))
+     (c-type-struct-field (string->symbol name) (apply-mods (expand-type ty) mods))]
+    ;; [`(declaration ,ty (declaration_variable (variable ,name) ,init))
+    ;;  (c-type-struct-field (string->symbol name) (expand-type ty))]
     [_ (error "expand-struct-field: Unknown syntax" x)]))
 
 (define (expand-argument x)
   (match x
-    [`(function_argument ,type (variable ,name)) (c-sigvar (string->symbol name) (expand-type type))]
+    [`(function_argument ,type (variable (variable_modifier ,mods) ... ,name))
+     (c-sigvar (string->symbol name) (apply-mods (expand-type type) mods))]
     [_ (error "expand-argument: Unknown syntax" x)]
+    ))
+
+(define (apply-mods ty mods)
+  (match mods
+    [(? null?) ty]
+    [(cons "*" rest) (c-type-pointer (apply-mods ty rest))]
+    [_ (error "apply-mods: Unhandled case" ty mods)]
     ))

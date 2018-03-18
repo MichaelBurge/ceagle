@@ -13,13 +13,16 @@
 (struct c-type-struct-field ([ name : Symbol ] [ type : c-type ]) #:transparent)
 (struct c-type-struct ([ fs : c-type-struct-fields ]) #:transparent)
 (struct c-type-alias ([ name : Symbol ]) #:transparent)
+(struct c-type-pointer ([ type : c-type ]) #:transparent)
+(struct c-type-void () #:transparent)
 (struct c-signature ([ ret  : c-type ] [ args : c-sigvars ]) #:transparent)
 
 (define-type c-type-struct-fields (Listof c-type-struct-field))
-(define-type c-type (U c-type-fixed c-type-struct c-type-alias c-signature))
+(define-type c-type (U c-type-fixed c-type-struct c-type-alias c-signature c-type-pointer c-type-void))
+(define-predicate c-type? c-type)
 
 (struct c-unit  ([ decls : c-declarations ]) #:transparent)
-(struct c-decl-var  c-declaration ([ name : Symbol ] [ type : c-type ] [ init : (Maybe c-expression) ] [ mods : c-modifiers ]) #:transparent)
+(struct c-decl-var  c-declaration ([ name : Symbol ] [ type : c-type ] [ init : (Maybe c-expression) ]) #:transparent)
 (struct c-decl-type c-declaration ([ name : Symbol ] [ type : c-type ]) #:transparent)
 (struct c-decl-func c-declaration ([ name : Symbol ] [ sig : c-signature ] [ body : c-statement ]) #:transparent)
 (define-type c-modifier (U 'extern 'static '*))
@@ -61,6 +64,7 @@
 (struct c-unop     c-expression ([ op : Symbol ] [ exp : c-expression ]) #:transparent)
 (struct c-function-call c-expression ([ func : c-expression ] [ args : c-expressions ]) #:transparent)
 (struct c-field-access  c-expression ([ source : c-expression ] [ name : Symbol ]) #:transparent)
+(struct c-cast     c-expression ([ type : c-type ] [ exp : c-expression ]) #:transparent)
 
 (struct c-field-info ([ offset : Integer ] [ size : Integer ]) #:transparent)
 

@@ -80,3 +80,6 @@
 (defmacro (%c-define-struct name init)
   `(begin (define ,name ,init)
           (%c-noinline ,name)))
+
+(defmacro (%c-define-pointer name init)
+  `(%c-define-fixnum ,name ,init))
