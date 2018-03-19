@@ -359,7 +359,7 @@ Compilation strategy
 (define (compile-switch sw)
   (destruct c-switch sw)
   (: equal? (-> Pyramid Pyramid Pyramid))
-  (define (equal? x y) (pyr-application (pyr-variable '=) (list x y)))
+  (define (equal? x y) (pyr-application (pyr-variable '%#-=) (list x y)))
   (: compile-cases (-> c-switch-cases Pyramid))
   (define (compile-cases cases)
     (if (null? cases)
