@@ -10,15 +10,16 @@
 (struct c-expression () #:transparent)
 
 (struct c-type-fixed ([ signed? : Boolean ] [ bits : Integer ]) #:transparent)
-(struct c-type-struct-field ([ name : Symbol ] [ type : c-type ]) #:transparent)
+(struct c-type-struct-field ([ name : (U #f Symbol) ] [ type : c-type ]) #:transparent)
 (struct c-type-struct ([ fs : c-type-struct-fields ]) #:transparent)
+(struct c-type-union ([ fs : c-type-struct-fields ]) #:transparent)
 (struct c-type-alias ([ name : Symbol ]) #:transparent)
 (struct c-type-pointer ([ type : c-type ]) #:transparent)
 (struct c-type-void () #:transparent)
 (struct c-signature ([ ret  : c-type ] [ args : c-sigvars ]) #:transparent)
 
 (define-type c-type-struct-fields (Listof c-type-struct-field))
-(define-type c-type (U c-type-fixed c-type-struct c-type-alias c-signature c-type-pointer c-type-void))
+(define-type c-type (U c-type-fixed c-type-struct c-type-alias c-signature c-type-pointer c-type-void c-type-union))
 (define-predicate c-type? c-type)
 
 (struct c-unit  ([ decls : c-declarations ]) #:transparent)

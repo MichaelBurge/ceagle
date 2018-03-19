@@ -21,6 +21,11 @@
                   (expand-statement body))]
     [`(typedef ,ty ,name) (c-decl-type (string->symbol name)
                                        (expand-type ty))]
+    [`(declaration ,ty (declaration_variable (variable (variable_modifier ,mods) ... ,name) ,init ...))
+     (let ([ init-exp (if (null? init)
+                          #f
+                          (expand-expression (first init)))])
+       (c-decl-var (string->symbol name) (apply-mods (expand-type ty) mods) init-exp))]
     [_ (error "expand-declaration: Unknown syntax" x)]
     ))
 
@@ -81,16 +86,22 @@
     ['(unsigned_char)          (c-type-fixed #f 8)]
     ['(signed_int)             (c-type-fixed #t 256)]
     ['(unsigned_int)           (c-type-fixed #f 256)]
-    [`(struct ,name . ,fields) (c-type-struct (map expand-struct-field fields))]
+    [`(struct ,(? string? name) ... . ,fields) (c-type-struct
+                                                (map expand-struct-field fields))]
+    [`(union ,(? string? name) ... . ,fields) (c-type-union
+                                               (map expand-struct-field fields))]
     [(? string? name)          (c-type-alias (string->symbol name))]
     [_ (error "expand-type: Unknown type" x)]))
 
 (define (expand-struct-field x)
   (match x
+    [`(declaration ,ty)
+     (match (expand-type ty)
+       [(and (struct c-type-union (fields)) x) (c-type-struct-field #f x)]
+       [_ (error "expand-struct-field: Only unions can be anonymous")]
+       )]
     [`(declaration ,ty (declaration_variable (variable (variable_modifier ,mods) ... ,name)))
      (c-type-struct-field (string->symbol name) (apply-mods (expand-type ty) mods))]
-    ;; [`(declaration ,ty (declaration_variable (variable ,name) ,init))
-    ;;  (c-type-struct-field (string->symbol name) (expand-type ty))]
     [_ (error "expand-struct-field: Unknown syntax" x)]))
 
 (define (expand-argument x)
@@ -106,3 +117,5 @@
     [(cons "*" rest) (c-type-pointer (apply-mods ty rest))]
     [_ (error "apply-mods: Unhandled case" ty mods)]
     ))
+
+(define (collapse-nested-anonymous-structs x) (flatten x))

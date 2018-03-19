@@ -1,4 +1,4 @@
-#lang reader "reader.rkt"
+#lang ceagle
 
 // BEGIN C++ COMPATIBILITY
 typedef unsigned int uint64_t;
@@ -53,7 +53,7 @@ const int VALUE_BISHOP = 300;
 const int VALUE_ROOK   = 500;
 const int VALUE_QUEEN  = 900;
 const int VALUE_AVAILABLE_MOVE = 5; // Points for each move available
-const int VALUE_CHECKMATE = -1000000; 
+const int VALUE_CHECKMATE = -1000000;
 const int VALUE_NEGAMAX_START = NEGATIVE_INFINITY;
 const int VALUE_CENTER = 10; // Points for holding the center
 const int VALUE_ATTACK = 20; // Points for being able to attack enemy pieces.
@@ -288,7 +288,7 @@ static int iterator_position(iterator x)
   int piece = next_iterator_piece(x);
   if (piece == PIECE_EMPTY) {
     return POSITION_INVALID;
-  } 
+  }
   uint64_t piece_bb = get_piece_bb(x, piece);
   int idx = lsb_first_set(piece_bb);
   return idx;
@@ -432,10 +432,10 @@ static uint64_t valid_knight_moves(gamestate x, int idx)
   uint64_t moves_bb = 0;
   moves_bb |= guard_west(bit(move_direction(idx + 2 * RANK, DIRECTION_WEST)));
   moves_bb |= guard_east(bit(move_direction(idx + 2 * RANK, DIRECTION_EAST)));
-  
+
   moves_bb |= guard_west(bit(move_direction(idx - 2 * RANK, DIRECTION_WEST)));
   moves_bb |= guard_east(bit(move_direction(idx - 2 * RANK, DIRECTION_EAST)));
-  
+
   moves_bb |= bit(move_direction(move_direction(move_direction(idx, DIRECTION_EAST), DIRECTION_EAST), DIRECTION_NORTH));
   moves_bb |= bit(move_direction(move_direction(move_direction(idx, DIRECTION_EAST), DIRECTION_EAST), DIRECTION_SOUTH));
 
@@ -501,7 +501,7 @@ static int closest_blocker(uint64_t blockers_ray, int direction)
     return msb_first_set(blockers_ray);
   default:
     __builtin_trap();
-  }  
+  }
 }
 
 static uint64_t shoot_ray_until_blocker(gamestate state, int idx, int direction)
@@ -636,7 +636,7 @@ static iterator reset_iterator_promotion_piece(gamestate g, iterator i)
       i.current_piece_bb != 0) {
     i.promotion_piece = PIECE_QUEEN;
   }
-  return i;  
+  return i;
 }
 
 static iterator reset_iterator_moves(gamestate g, iterator i)
@@ -683,7 +683,7 @@ static iterator advance_iterator(gamestate g, iterator i)
   if (is_iterator_finished(i) && i.current_piece_bb != 0) {
     __builtin_trap();
   }
-  
+
   return i;
 }
 
@@ -700,7 +700,7 @@ static gamestate switch_sides(gamestate x)
   x.pawns_bb   = __builtin_bswap64(x.pawns_bb);
   return x;
 }
-                 
+
 static iterator mkIterator(gamestate g)
 {
   iterator x = g;
@@ -711,12 +711,12 @@ static iterator mkIterator(gamestate g)
   x.kings_bb   &= x.current_player_bb;
   x.pawns_bb   &= x.current_player_bb;
   x.promotion_piece = 0;
-  
+
   x = reset_iterator_moves(g, x);
   if (! x.current_piece_bb) {
     x = advance_iterator(g, x);
   }
-  
+
   return x;
 }
 
@@ -898,7 +898,7 @@ static gamestate apply_move(gamestate g, move m)
   g.is_white = ! g.is_white;
 
   g = swap_board(g);
-  
+
   return g;
 }
 
@@ -1118,21 +1118,21 @@ static uint64_t center()
     bit(mkPosition(2,3)) |
     bit(mkPosition(2,4)) |
     bit(mkPosition(2,5)) |
-    
+
     bit(mkPosition(3,2)) |
     bit(mkPosition(3,3)) |
     bit(mkPosition(3,4)) |
     bit(mkPosition(3,5)) |
-    
+
     bit(mkPosition(4,2)) |
     bit(mkPosition(4,3)) |
     bit(mkPosition(4,4)) |
     bit(mkPosition(4,5)) |
-    
+
     bit(mkPosition(5,2)) |
     bit(mkPosition(5,3)) |
     bit(mkPosition(5,4)) |
-    bit(mkPosition(5,5));    
+    bit(mkPosition(5,5));
 }
 
 static int score_center(gamestate g)

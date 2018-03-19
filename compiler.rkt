@@ -99,7 +99,7 @@ Compilation strategy
           (match (assoc name (map (λ ([ f : c-type-struct-field ]) (cons (c-type-struct-field-name f)
                                                (c-type-struct-field-type f)))
                                   fields))
-            [#f (error "expression-type: No field with name found" source name)]
+            [#f (error "expression-type: No field with name found" source name fields)]
             [(cons _ (? c-type? ty)) ty])]
          [ ty (error "expression-type: Attempted to access a field from a non-struct" ty source name)])]
       [_ (error "expression-type: Unhandled case" exp)]
@@ -121,7 +121,14 @@ Compilation strategy
       [(struct c-type-alias _) (type-size (resolve-type x))]
       [(struct c-signature _) 32]
       [(struct c-type-pointer _) 32]
+      [(struct c-type-union (fields)) (fields-max-size fields)]
       [_ (error "type-size: Unknown case" x)]))
+
+  (: fields-max-size (-> c-type-struct-fields Integer))
+  (define (fields-max-size fields)
+    (apply max (map (λ ([x : c-type-struct-field ])
+                      (type-size (c-type-struct-field-type x)))
+                    fields)))
   )
 (require 'typechecker)
 
@@ -163,6 +170,7 @@ Compilation strategy
     [(struct c-type-struct _) '%c-define-struct]
     [(struct c-type-alias _) (variable-definer (resolve-type ty))]
     [(struct c-type-pointer _) '%c-define-pointer]
+    [(struct c-type-union _) '%c-define-union]
     [_ (error "variable_definer: Unhandled case" ty)]))
 
 (: compile-default-initializer (-> c-type Pyramid))
@@ -171,6 +179,7 @@ Compilation strategy
     [(struct c-type-fixed _) (expand-pyramid `(%-unbox 0))]
     [(struct c-type-alias _) (compile-default-initializer (resolve-type ty))]
     [(struct c-type-struct _) (quasiquote-pyramid `(%c-allocate-struct ,(pyr-const (type-size ty))))]
+    [(struct c-type-union _) (quasiquote-pyramid `(%c-allocate-struct ,(pyr-const (type-size ty))))]
     ))
 
 (: compile-decl-type (-> c-decl-type Pyramid))
@@ -256,8 +265,13 @@ Compilation strategy
       `(let ([ copy (%c-allocate-struct ,size)])
          (%c-struct-copy (%-unbox ,size) ,exp copy)))]
     [('rvalue (struct c-type-pointer _)) (quasiquote-pyramid `(%c-word-read ,exp))]
+    [('rvalue (struct c-type-union _))
+     (quasiquote-pyramid
+      `(let ([ copy (%c-allocate-struct ,size)])
+         (%c-struct-copy (%-unbox ,size) ,exp copy)))]
     [('lvalue (struct c-type-fixed _)) exp]
     [('lvalue (struct c-type-struct _)) exp]
+    [('lvalue (struct c-type-union _)) exp]
     [(_ _)    (error "compile-variable: Unhandled case" val-ty exp-ty)]
     ))
 
@@ -322,7 +336,7 @@ Compilation strategy
   (destruct c-field-access x)
   (define ty (expression-type x-source))
   (define field-table (type-field-table ty))
-  (define info (hash-ref field-table x-name (λ () (error "compile-field-access: Field not found" ty x))))
+  (define info (hash-ref field-table x-name (λ () (error "compile-field-access: Field not found" (resolve-type ty) x field-table))))
   (destruct c-field-info info)
   (define ptr-exp
     (quasiquote-pyramid
@@ -472,16 +486,40 @@ Compilation strategy
     [(struct c-type-alias _) (error "type-field-table: Unexpected case" ty)]
     [(struct c-type-struct (fs)) (struct-fields->field-table fs)]
     [(struct c-type-pointer _) (make-field-table)]
+    [(struct c-type-union (fs)) (union-fields->field-table fs)]
     [x (error "type-field-table: Unknown case" x)]
     ))
+
+(: union-fields->field-table (-> c-type-struct-fields FieldTable))
+(define (union-fields->field-table fs)
+  (define ret (make-field-table))
+  (define size (fields-max-size fs))
+  (for ([ f fs ])
+    (match (c-type-struct-field-name f)
+      [#f (error "union-fields->field-table: Nested anonymous unions not supported" f)]
+      [(? symbol? name) (hash-set! ret name (c-field-info 0 size))]
+      ))
+  ret)
 
 (: struct-fields->field-table (-> c-type-struct-fields FieldTable))
 (define (struct-fields->field-table fs)
   (define ret (make-field-table))
   (define os 0)
   (for ([ f fs ])
-    (let ([ size (type-size (c-type-struct-field-type f))])
-      (hash-set! ret (c-type-struct-field-name f) (c-field-info os size))
+    (let* ([ ty (c-type-struct-field-type f) ]
+           [ name (c-type-struct-field-name f) ]
+           [ size (type-size ty) ]
+           [ fi (c-field-info os size)])
+      (match* (name ty)
+        [(#f (struct c-type-union (fs2)))
+         (for ([ f2 fs2])
+           (let ([ name2 (c-type-struct-field-name f2) ])
+             (if name2
+                 (hash-set! ret name2 fi)
+                 (error "struct-fields->field-table: Nested anonymous unions not supported" f2))))]
+        [(#f _) (error "struct-fields->field-table: Only unions can be unnamed struct memebers" f)]
+        [((? symbol? name) _)  (hash-set! ret name fi)]
+        )
       (set! os (+ os size))
       ))
   ret)

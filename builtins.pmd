@@ -82,4 +82,9 @@
           (%c-noinline ,name)))
 
 (defmacro (%c-define-pointer name init)
-  `(%c-define-fixnum ,name ,init))
+  `(begin (%c-define-fixnum ,name ,init)
+          (%c-noinline ,name)))
+
+(defmacro (%c-define-union name init)
+  `(begin (define ,name ,init)
+          (%c-noinline ,name)))
