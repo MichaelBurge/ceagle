@@ -33,7 +33,13 @@
   (match x
     [`(label_definition ,id ,stmt)  (c-block (list (c-label (string->symbol id)) (expand-statement stmt)))]
     [`(expression_statement ,exp)   (c-expression-statement (expand-expression exp))]
-    [`(switch ,actual . ,cases)     (c-switch actual (map expand-switch-case cases))]
+    [`(switch ,actual . ,cases)     (let* ([ cases (map expand-switch-case cases) ]
+                                           [ expr-cases (filter c-switch-case? cases)]
+                                           [ default-case (match (filter (negate c-switch-case?) cases)
+                                                            ['() (c-block '())]
+                                                            [(list x) x]
+                                                            [_ (error "expand-statement: Expected only one default statement" cases)])])
+                                      (c-switch (expand-expression actual) expr-cases default-case))]
     [`(if ,pred ,cons)              (c-if (expand-expression pred) (expand-statement cons) (c-block '()))]
     [`(if ,pred ,cons ,alt)         (c-if (expand-expression pred) (expand-statement cons) (expand-statement alt))]
     [`(for ,init ,pred ,post ,body) (c-for (if (null? init) #f (expand-statement init))
@@ -53,6 +59,7 @@
                           (expand-expression (first init)))])
        (c-decl-var (string->symbol name) (apply-mods (expand-type ty) mods) init-exp))]
     [`(empty)                       (c-block '())]
+    ['sequence                      (c-block '())]
     [`(sequence . ,xs)              (c-block (map expand-statement xs))]
     [_ (error "expand-statement: Unknown syntax" x)]
     ))
@@ -75,8 +82,8 @@
 
 (define (expand-switch-case x)
   (match x
-    [`(switch_case ,expected ,seq) (c-switch-case expected (c-block (map expand-statement seq)))]
-    [`(switch_default ,seq)        (c-switch-default (c-block (map expand-statement seq)))]
+    [`(switch_case ,expected ,seq) (c-switch-case (expand-expression expected) (c-block (map expand-statement seq)))]
+    [`(switch_default ,seq)        (c-block (map expand-statement seq))]
     [_ (error "expand-switch-case: Unknown syntax" x)]
     ))
 
