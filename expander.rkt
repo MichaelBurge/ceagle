@@ -181,8 +181,8 @@
              #:with statement #'(c-while cond.expression body.statement)]
     [pattern ((~literal iteration_statement) DO body:statement cond:expression)
              #:with statement #'(c-do-while cond.expression body.statement)]
-    [pattern ((~literal iteration_statement) FOR init:declaration cond:expression-statement (~optional post:expression) body:statement)
-             #:with statement #'(c-for init.declarations cond.expression post.expression body.statement)]
+    [pattern ((~literal iteration_statement) FOR init:declaration cond:expression-statement (~optional post:expression #:defaults ([ post.expression #'#f])) body:statement)
+             #:with statement #`(c-for init.declarations cond.expression post.expression body.statement)]
     )
   (define-syntax-class jump-statement
     #:attributes (statement)
@@ -487,6 +487,7 @@
       ['typedef ty] ; Ignore typedef, but we still need to determine a type from the other specifiers.
       ['const ty ]
       ['static ty ]
+      ['void (c-type-void)]
       ['unsigned
        (match ty
          [(struct c-type-fixed _) (begin (set-c-type-fixed-signed?! ty #f)
