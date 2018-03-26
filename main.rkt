@@ -4,11 +4,12 @@
 (require "lexer.rkt")
 (require "expander.rkt")
 (require "compiler.rkt")
+(require (for-syntax pyramid/globals))
 
 (provide read
          read-syntax
-         compile-c
-         expand-c
+         compile-translation-unit
+         expand-translation-unit
          (all-from-out "types.rkt")
 
          (rename-out [ c-module-begin #%module-begin ]))
@@ -28,18 +29,20 @@
   (define (read-syntax path port)
     (define tokens (tokenize-all port))
     (verbose-section "Ceagle Tokens" VERBOSITY-MEDIUM
-                   (pretty-print tokens))
+                     (pretty-print tokens))
+    (verbose-section "Lexer Hack state" VERBOSITY-HIGH
+                     (print-lexer-hack-state))
     (define parse-tree (parse tokens))
-    (verbose-section "Ceagle Parse Tree" VERBOSITY-MEDIUM
+    (verbose-section "Ceagle Parse Tree" VERBOSITY-HIGH
                    (pretty-print (syntax->datum parse-tree)))
     (define module-datum `(module c-mod ceagle
                             ,parse-tree))
     ;(displayln module-datum)
     (define stx (datum->syntax #f module-datum))
-    stx
     ;; (displayln tokens)
     ;; (displayln all-token-types)
     ;; (pretty-print (parse-to-datum tokens))
+    stx
     ))
 
 (define-syntax (c-module-begin stx)
@@ -47,6 +50,10 @@
     ;[(_ x) #`(#%module-begin (quote #,(expand-c #'x)))]))
     [(_ x)
      #`(#%module-begin
-              (provide program)
-              (define program (compile-c (expand-c #'x))))]
+        (provide program-info)
+        (define program-info
+          (let* ([ source-code (quote x)]
+                 [ abstract-syntax (expand-translation-unit x)]
+                 [ program (compile-translation-unit abstract-syntax)])
+            (list source-code abstract-syntax program))))]
     ))

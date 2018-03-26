@@ -7,7 +7,8 @@
 (require brag/support)
 
 (provide make-tokenizer
-         tokenize-all)
+         tokenize-all
+         print-lexer-hack-state)
 
 (define-lex-abbrev identifier
   (:: (:or alphabetic "_")
@@ -16,6 +17,41 @@
 (define-lex-abbrev hex (:or numeric "a" "b" "c" "d" "e" "f" "A" "B" "C" "D" "E" "F"))
 
 (define (operator x) (token x x))
+(define (keyword x) (token x x))
+
+(define *types* (mutable-set))
+(define *gathering-type?* #f)
+(define *last-identifier* #f)
+(define *brace-level* 0)
+
+(define (print-lexer-hack-state)
+  (println `([ TYPES . ,*types* ]
+             [ GATHERING-TYPE? . ,*gathering-type?*]
+             [ LAST-IDENTIFIER . ,*last-identifier*])))
+
+(define (begin-gathering-type)
+  ;(println `(START))
+  (set! *gathering-type?* #t))
+
+(define (maybe-gather id)
+  ;(println `(DEBUG ,id))
+  (when (and *gathering-type?* (= *brace-level* 0))
+    (set! *last-identifier* id)))
+
+(define (stop-gathering)
+  ;(println `(COMMIT ,*gathering-type?* ,*last-identifier* ,*brace-level*))
+  (when (and *gathering-type?* *last-identifier* (= *brace-level* 0))
+    (set-add! *types* *last-identifier*)
+    (set! *gathering-type?* #f)
+    (set! *last-identifier* #f)
+    )
+  )
+
+(define (lbrace)
+  (set! *brace-level* (+ *brace-level* 1)))
+
+(define (rbrace)
+  (set! *brace-level* (- *brace-level* 1)))
 
 (define c-lexer
   (lexer-src-pos
@@ -29,21 +65,22 @@
    [(:: "0x" (:+ hex))       (token 'INTEGER (string->number (substring lexeme 2) 16))]
    [(:: (:+ numeric)  "ULL") (token 'INTEGER (string->number (substring lexeme 0 (- (string-length lexeme) 3))))]
    [(:+ numeric)             (token 'INTEGER (string->number lexeme))]
-   [(:: "'" (char-complement "'") "'") (token 'ONECHAR (substring lexeme 1 2))]
-   ["'\\''"                  (token 'ONECHAR "'")]
+   [(:: "'" (char-complement "'") "'") (token 'INTEGER (char->integer (string-ref lexeme 1)))]
+   ["'\\''"                  (token 'ONECHAR (char->integer #\'))]
    [(:: "\""                 (:* (char-complement "\"")) "\"") (token 'STRING lexeme)]
    ; Punctuation
-   ["{"  (operator 'LCURLY )]
-   ["}"  (operator 'RCURLY )]
-   ["("  (operator 'LPAREN )]
-   [")"  (operator 'RPAREN )]
-   ["["  (operator 'LSQUARE)]
-   ["]"  (operator 'RSQUARE)]
-   [";"  (operator 'SEMI   )]
-   [","  (operator 'COMMA  )]
-   [":"  (operator 'COLON  )]
-   ["'"  (operator 'SQUOTE )]
-   ["\"" (operator 'DQUOTE )]
+   ["{"   (begin (lbrace) lexeme )]
+   ["}"   (begin (rbrace) lexeme )]
+   ["("   lexeme ]
+   [")"   lexeme ]
+   ["["   lexeme ]
+   ["]"   lexeme ]
+   [";"   (begin (stop-gathering) lexeme )]
+   [","   lexeme ]
+   [":"   lexeme ]
+   ["'"   lexeme ]
+   ["\""  lexeme ]
+   ["..." lexeme ]
    ; Operators
    [(:or "?" "<<=" ">>=" "+=" "-=" "*=" "/=" "%=" "||="
          "|=" "^=" "&&=" "&=" "~=" "++" "--" "<<" ">>" "+"
@@ -51,30 +88,35 @@
          "!=" "!"  "<="  "<"  ">=" ">"  "==" "=" "->" ".") lexeme]
 
    ; Keywords
-   ["typedef"  (token 'TYPEDEF )]
-   ["struct"   (token 'STRUCT  )]
-   ["int"      (token 'INT     )]
-   ["void"     (token 'VOID    )]
-   ["char"     (token 'CHAR    )]
-   ["union"    (token 'UNION   )]
-   ["unsigned" (token 'UNSIGNED)]
-   ["const"    (token 'CONST   )]
-   ["static"   (token 'STATIC  )]
-   ["return"   (token 'RETURN  )]
-   ["if"       (token 'IF      )]
-   ["else"     (token 'ELSE    )]
-   ["continue" (token 'CONTINUE)]
-   ["break"    (token 'BREAK   )]
-   ["switch"   (token 'SWITCH  )]
-   ["case"     (token 'CASE    )]
-   ["default"  (token 'DEFAULT )]
-   ["goto"     (token 'GOTO    )]
-   ["extern"   (token 'EXTERN  )]
-   ["while"    (token 'WHILE   )]
-   ["do"       (token 'DO      )]
-   ["for"      (token 'FOR     )]
-   ["static"   (token 'STATIC  )]
-   [identifier (token 'IDENTIFIER lexeme)]
+   ["typedef"  (begin (begin-gathering-type) (keyword 'TYPEDEF ))]
+   ["struct"   (keyword 'STRUCT  )]
+   ["int"      (keyword 'INT     )]
+   ["void"     (keyword 'VOID    )]
+   ["char"     (keyword 'CHAR    )]
+   ["union"    (keyword 'UNION   )]
+   ["unsigned" (keyword 'UNSIGNED)]
+   ["const"    (keyword 'CONST   )]
+   ["static"   (keyword 'STATIC  )]
+   ["return"   (keyword 'RETURN  )]
+   ["if"       (keyword 'IF      )]
+   ["else"     (keyword 'ELSE    )]
+   ["continue" (keyword 'CONTINUE)]
+   ["break"    (keyword 'BREAK   )]
+   ["switch"   (keyword 'SWITCH  )]
+   ["case"     (keyword 'CASE    )]
+   ["default"  (keyword 'DEFAULT )]
+   ["goto"     (keyword 'GOTO    )]
+   ["extern"   (keyword 'EXTERN  )]
+   ["while"    (keyword 'WHILE   )]
+   ["do"       (keyword 'DO      )]
+   ["for"      (keyword 'FOR     )]
+   ["static"   (keyword 'STATIC  )]
+   ["volatile" (keyword 'VOLATILE)]
+   [identifier (let ([ sym (string->symbol lexeme)])
+                 (maybe-gather sym)
+                 (if (set-member? *types* sym)
+                     (token 'TYPE_NAME sym)
+                     (token 'IDENTIFIER sym)))]
    ))
 
 (define (make-tokenizer ip)

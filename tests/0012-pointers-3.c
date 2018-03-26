@@ -5,14 +5,14 @@
 
 typedef struct tree {
   int x;
-  tree *l;
-  tree *r;
+  struct tree *l;
+  struct tree *r;
 } tree;
 
 typedef struct reverse_tree {
   int x;
-  reverse_tree *r;
-  reverse_tree *l;
+  struct reverse_tree *r;
+  struct reverse_tree *l;
 } reverse_tree;
 
 reverse_tree *reverse(tree *t) {

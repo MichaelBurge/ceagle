@@ -6,8 +6,10 @@
 (require pyramid/parser)
 (require (submod pyramid/parser macros))
 (require pyramid/utils)
+(require pyramid/io)
+(require pyramid/globals)
 
-(provide compile-c)
+(provide compile-translation-unit)
 
 #|
 Compilation strategy
@@ -25,10 +27,17 @@ Compilation strategy
 * Variables are always initialized with an rvalue
 * Parameters are always passed as rvalues
 * Return values are passed as rvalues
+
+Switch Statements
+ 1. Compile a list of all case statements bound to this switch
+ 2. Put them into a table with the constant as key, and a new label as value. default: or breakpoint is the fallback
+ 3. Generate a (cond) from the table. The condition is equality with the case X and the provided switch value. The action is a jump.
+ 4. When compiling default: and case: statements, produce a label deterministically-calculated from the currently active switch and its case: argument.
 |#
 
 (module typechecker typed/racket
   (require "types.rkt")
+  (require (submod pyramid/types common))
   (require/typed racket/hash
     [ hash-union! (-> (HashTable Symbol c-type) (HashTable Symbol c-type) [#:combine/key (-> Symbol c-type c-type c-type)] Void)]
     [ hash-union (-> (HashTable Symbol c-type) (HashTable Symbol c-type) [#:combine/key (-> Symbol c-type c-type c-type)] (HashTable Symbol c-type))]
@@ -38,18 +47,34 @@ Compilation strategy
 
   (provide (all-defined-out))
 
+  (: *struct-registry* (Parameterof TypeRegistry))
+  (define *struct-registry* (make-parameter (make-type-registry)))
+
+  (: *union-registry* (Parameterof TypeRegistry))
+  (define *union-registry* (make-parameter (make-type-registry)))
+
   (: *type-registry* (Parameterof TypeRegistry))
   (define *type-registry* (make-parameter (make-type-registry)))
 
   (: *variables* (Parameterof variable-table))
   (define *variables* (make-parameter (make-variable-table)))
 
-  (: register-type! (-> Symbol c-type Void))
-  (define (register-type! name ty)
-    (hash-set! (*type-registry*) name ty))
+  (: unsafe-register-type! (-> Symbol c-type c-typespace Void))
+  (define (unsafe-register-type! name ty typespace)
+    (hash-set! (typespace-registry typespace)
+               name
+               ty)
+    )
+
+
+  (: register-type! (-> Symbol c-type c-typespace Void))
+  (define (register-type! name ty typespace)
+    (maybe-register-type! ty)
+    (unsafe-register-type! name ty typespace))
 
   (: register-variable! (-> Symbol c-type Void))
   (define (register-variable! name ty)
+    (maybe-register-type! ty)
     (hash-set! (*variables*) name ty))
 
   (: with-function-scope (All (A) (-> c-signature (-> A) A)))
@@ -68,18 +93,41 @@ Compilation strategy
       (hash-set! ret (c-sigvar-name sv) (c-sigvar-type sv)))
     ret)
 
+  (: typespace-registry (-> c-typespace TypeRegistry))
+  (define (typespace-registry ty)
+    (match ty
+      [#f      (*type-registry*)]
+      ['struct (*struct-registry*)]
+      ['union  (*union-registry*)]
+      ))
+
+  ; register-type! handles typedefs. This handles "struct x { } => struct x;" associations.
+  (: maybe-register-type! (-> c-type Void))
+  (define (maybe-register-type! ty)
+    (match ty
+      [(struct c-type-fixed _) (void)]
+      [(struct c-type-struct (name _)) (when name (unsafe-register-type! name ty 'struct))]
+      [(struct c-type-union (name _)) (when name (unsafe-register-type! name ty 'union))]
+      [(struct c-type-alias _) (void)]
+      [(struct c-signature (ret args)) (maybe-register-type! ret)
+                                       (for ([ arg args])
+                                         (maybe-register-type! (c-sigvar-type arg))
+                                         )]
+      [(struct c-type-void _) (void)]
+      [(struct c-type-pointer (ty)) (maybe-register-type! ty)]
+      ))
+
   (: resolve-type (-> c-type c-type))
   (define (resolve-type ty)
     (match ty
-      [(struct c-type-alias (name)) (resolve-type (hash-ref (*type-registry*)
-                                                            name
-                                                            (λ () (error "resolve-type: Unknown type" name))))]
-      [_ ty]))
+      [(struct c-type-alias (name typespace)) (resolve-type (hash-ref (typespace-registry typespace)
+                                                                      name
+                                                                      (λ () (error "resolve-type: Unknown type" name typespace))))]
+      [_ ty]
+      ))
 
   (: expression-type (-> c-expression c-type))
   (define (expression-type exp)
-    (define t-uint (c-type-fixed #f 256))
-    (define t-int  (c-type-fixed #t 256))
     (define macro-type (c-signature t-uint '()))
     (match exp
       [(struct c-const ((? exact-positive-integer?))) t-uint]
@@ -92,10 +140,14 @@ Compilation strategy
          [(struct c-type-pointer (x)) x]
          [ty (error "expression-type: Attempted to dereference a non-pointer" ty exp)])]
       [(struct c-unop (_ exp)) (expression-type exp)]
-      [(struct c-function-call _) (error "expression-type: Unimplemented function call" exp)]
+      [(struct c-function-call (func _))
+       (match (expression-type func)
+         [(struct c-signature (ret _)) ret]
+         [_ (error "expression-type: Unknown function call" func)]
+         )]
       [(struct c-field-access (source name))
        (match (resolve-type (expression-type source))
-         [(struct c-type-struct (fields))
+         [(struct c-type-struct (_ fields))
           (match (assoc name (map (λ ([ f : c-type-struct-field ]) (cons (c-type-struct-field-name f)
                                                (c-type-struct-field-type f)))
                                   fields))
@@ -109,22 +161,19 @@ Compilation strategy
   (define (pointer-expression? x)
     (c-type-pointer? (expression-type x)))
 
-  (: bits->bytes (-> Integer Integer))
-  (define (bits->bytes x) (quotient x 8))
-
-  (: type-size (-> c-type Integer))
+  (: type-size (-> c-type Size))
   (define (type-size x)
     (match x
-      [(struct c-type-fixed (_ bits)) (bits->bytes bits)]
-      [(struct c-type-struct (fields)) (for/sum ([ field fields ])
-                                         (type-size (c-type-struct-field-type field)))]
+      [(struct c-type-fixed (_ bytes)) bytes]
+      [(struct c-type-struct (_ fields)) (for/sum : Size ([ field fields ])
+                                           (type-size (c-type-struct-field-type field)))]
       [(struct c-type-alias _) (type-size (resolve-type x))]
       [(struct c-signature _) 32]
       [(struct c-type-pointer _) 32]
-      [(struct c-type-union (fields)) (fields-max-size fields)]
+      [(struct c-type-union (_ fields)) (fields-max-size fields)]
       [_ (error "type-size: Unknown case" x)]))
 
-  (: fields-max-size (-> c-type-struct-fields Integer))
+  (: fields-max-size (-> c-type-struct-fields Size))
   (define (fields-max-size fields)
     (apply max (map (λ ([x : c-type-struct-field ])
                       (type-size (c-type-struct-field-type x)))
@@ -132,9 +181,17 @@ Compilation strategy
   )
 (require 'typechecker)
 
-(: compile-c (-> c-unit Pyramid))
-(define (compile-c x)
+(: *switch-counter* (Parameterof Counter))
+(define *switch-counter* (make-parameter 0))
+
+(: *switch-base* (Parameterof Counter))
+(define *switch-base* (make-parameter 0))
+
+(: compile-translation-unit (-> c-unit Pyramid))
+(define (compile-translation-unit x)
   (destruct c-unit x)
+  (verbose-section "Ceagle AST" VERBOSITY-LOW
+                   (pretty-print x))
   (register-builtins!)
   (let ([ decls     (pyr-begin (map compile-declaration x-decls)) ]
         [ call-main (c-function-call (c-variable 'main) (list))])
@@ -185,7 +242,7 @@ Compilation strategy
 (: compile-decl-type (-> c-decl-type Pyramid))
 (define (compile-decl-type x)
   (destruct c-decl-type x)
-  (register-type! x-name x-type)
+  (register-type! x-name x-type #f)
   (pyr-begin (list)))
 
 (: compile-decl-func (-> c-decl-func Pyramid))
@@ -211,7 +268,9 @@ Compilation strategy
 (: compile-statement (-> c-statement Pyramid))
 (define (compile-statement x)
   (match x
-    [(? c-label?)                (compile-label       x)]
+    [(? c-labeled?)              (compile-labeled         x)]
+    [(? c-labeled-case?)         (compile-labeled-case    x)]
+    [(? c-labeled-default?)      (compile-labeled-default x)]
     [(? c-expression-statement?) (compile-expression  (c-expression-statement-exp x) 'rvalue)]
     [(? c-switch?)               (compile-switch      x)]
     [(? c-if?)                   (compile-if          x)]
@@ -226,11 +285,31 @@ Compilation strategy
     [(? c-declaration?)          (compile-declaration x)]
     [_                           (error "compile-statement: Unknown case" x)]))
 
-(: compile-label (-> c-label Pyramid))
-(define (compile-label x)
-  (destruct c-label x)
+(: compile-labeled (-> c-labeled Pyramid))
+(define (compile-labeled x)
+  (destruct c-labeled x)
   (expand-pyramid
-   `(asm (label (quote ,x-name)))))
+   `(begin (asm (label (quote ,x-name)))
+           ,(shrink-pyramid (compile-statement x-body)))))
+
+(: compile-labeled-statement (-> label c-statement Pyramid))
+(define (compile-labeled-statement lbl stmt)
+  (expand-pyramid
+   `(begin (asm (label (quote ,(label-name lbl))))
+           ,(shrink-pyramid (compile-statement stmt))))
+  )
+
+(: compile-labeled-case (-> c-labeled-case Pyramid))
+(define (compile-labeled-case x)
+  (compile-labeled-statement (switch-case-label x)
+                             (c-labeled-case-body x))
+  )
+
+(: compile-labeled-default (-> c-labeled-default Pyramid))
+(define (compile-labeled-default x)
+  (compile-labeled-statement (switch-default-label x)
+                             (c-labeled-default-body x))
+  )
 
 (: compile-expression (-> c-expression c-value-type Pyramid))
 (define (compile-expression x val-ty)
@@ -243,6 +322,7 @@ Compilation strategy
     [(? c-function-call?) (compile-function-call x val-ty)]
     [(? c-field-access?)  (compile-field-access  x val-ty)]
     [(? c-cast?)          (compile-cast          x val-ty)]
+    [(? c-expression-sequence?) (compile-expression-sequence x val-ty)]
     [_                    (error "compile-expression: Unknown case" x)]))
 
 (: compile-const (-> c-const c-value-type Pyramid))
@@ -272,6 +352,7 @@ Compilation strategy
     [('lvalue (struct c-type-fixed _)) exp]
     [('lvalue (struct c-type-struct _)) exp]
     [('lvalue (struct c-type-union _)) exp]
+    [('lvalue (struct c-type-pointer (ptr-ty))) exp]
     [(_ _)    (error "compile-variable: Unhandled case" val-ty exp-ty)]
     ))
 
@@ -287,29 +368,69 @@ Compilation strategy
   (destruct c-binop x)
   (define rvalue-exp (pyr-application (op->builtin x-op)
                                       (list (compile-expression x-left 'rvalue)
-                                            (compile-expression x-right 'rvalue)
-                                            )))
-  (if (wants-lvalue? x-op)
-      (quasiquote-pyramid
-       `(let ([ value ,rvalue-exp ])
-          (begin (%c-word-write! ,(compile-expression x-left 'lvalue)
-                                 value)
-                 value)))
-      rvalue-exp))
+                                            (compile-expression x-right 'rvalue))))
+  (define vop (assign-op->value-op x-op))
+  (match x-op
+    ['+ (compile-binop (c-binop 'raw+
+                                (c-binop '* x-left
+                                         (c-const (type-increment-size (expression-type x-left))))
+                                (c-binop '* x-right
+                                         (c-const (type-increment-size (expression-type x-right)))))
+                       'rvalue)]
+    ['- (compile-binop (c-binop 'raw-
+                                (c-binop '* x-left
+                                         (c-const (type-increment-size (expression-type x-left))))
+                                (c-binop '* x-right
+                                         (c-const (type-increment-size (expression-type x-right)))))
+                       'rvalue)]
+    [ _ (if vop ; vop is only true if x-op was an assignment
+            (quasiquote-pyramid
+             `(let ([ value ,(compile-binop (c-binop vop x-left x-right) 'rvalue)])
+                (begin (%c-word-write! ,(compile-expression x-left 'lvalue)
+                                       value)
+                       value)))
+            rvalue-exp)]
+    ))
+
+; x+1 on a T pointer increases the word in x by sizeof(T).
+(: type-increment-size (-> c-type Size))
+(define (type-increment-size ty)
+  (match (resolve-type ty)
+    [(struct c-type-pointer (ty2)) (type-size ty2)]
+    [(struct c-type-fixed _) 1]
+    ))
 
 (: compile-unop (-> c-unop c-value-type Pyramid))
 (define (compile-unop x val-ty)
   (destruct c-unop x)
   (define rvalue-exp (pyr-application (op->builtin x-op)
                                       (list (compile-expression x-exp 'rvalue))))
+  (define (wants-old?)
+    (match x-op
+      ['post++ #t]
+      ['post-- #t]
+      ['pre++  #f]
+      ['pre--  #f]
+      ))
   (match x-op
     ['& (compile-expression x-exp 'lvalue)]
     ['* (compile-dereference x-exp val-ty)]
-    [(? wants-lvalue?)
+    ['- (compile-expression (c-binop '- (c-const 0) x-exp) val-ty)]
+    ['+ (compile-expression x-exp val-ty)]
+    ['pre++ (compile-expression (c-binop '+= x-exp (c-const 1)) val-ty)]
+    ['pre-- (compile-expression (c-binop '-= x-exp (c-const 1)) val-ty)]
+    ['post++
+     (assert (equal? val-ty 'rvalue))
      (quasiquote-pyramid
-      `(let ([ value ,rvalue-exp ])
-         (%c-word-write! ,(compile-expression x-exp 'lvalue) value)
-         value))]
+              `(let* ([ old   ,(compile-expression x-exp 'rvalue) ])
+                 ,(compile-expression (c-binop '+= x-exp (c-const 1)) 'rvalue)
+                 old))]
+    ['post--
+     (assert (equal? val-ty 'rvalue))
+     (quasiquote-pyramid
+              `(let* ([ old   ,(compile-expression x-exp 'rvalue) ])
+                 ,(compile-expression (c-binop '-= x-exp (c-const 1)) 'rvalue)
+                 old))]
     [_ rvalue-exp]
     ))
 
@@ -355,23 +476,115 @@ Compilation strategy
   (compile-expression x-exp val-ty)
   )
 
+(: compile-expression-sequence (-> c-expression-sequence c-value-type Pyramid))
+(define (compile-expression-sequence x val-ty)
+  (destruct c-expression-sequence x)
+  (quasiquote-pyramid
+   `(begin ,@(map (λ ([ exp : c-expression ])
+                    (compile-expression exp val-ty))
+                  x-exps)))
+  )
+
+; See "Switch Statements"
 (: compile-switch      (-> c-switch      Pyramid))
 (define (compile-switch sw)
-  (destruct c-switch sw)
-  (: equal? (-> Pyramid Pyramid Pyramid))
-  (define (equal? x y) (pyr-application (pyr-variable '%#-=) (list x y)))
-  (: compile-cases (-> c-switch-cases Pyramid))
-  (define (compile-cases cases)
-    (if (null? cases)
-        (compile-statement sw-default)
-        (let ([ hd (first cases) ]
-              [ tl (rest  cases) ])
-          (destruct c-switch-case hd)
-          (pyr-if (equal? (compile-expression hd-expected 'rvalue)
-                          (compile-expression sw-actual 'rvalue))
-                  (compile-statement hd-body)
-                  (compile-cases tl)))))
-  (with-breakpoint (compile-cases sw-cs)))
+  (with-switch-base
+    (define-values (cases default) (switch-labels sw))
+    (define label-after (make-label 'switch-after))
+    (: jump (-> label Pyramid))
+    (define (jump lbl) (expand-pyramid `(asm (goto (label (quote ,(label-name lbl)))))))
+    (: make-condition-entry (-> c-labeled-case Pyramid))
+    (define (make-condition-entry c)
+      (define cond-expr (c-labeled-case-expected c))
+      (quasiquote-pyramid
+       `((,(compile-expression cond-expr 'rvalue)) ,(jump (switch-case-label c))))
+      )
+    (: make-jump-table (-> c-labeled-cases (Maybe c-labeled-default) Pyramids))
+    (define (make-jump-table cases default)
+      (append (map make-condition-entry cases)
+              (list (quasiquote-pyramid `(else ,(if default
+                                                    (jump (switch-default-label default))
+                                                    (expand-pyramid `(break 0))))))))
+    (with-breakpoint
+      (quasiquote-pyramid
+       `(begin (%c-case ,(compile-expression (c-switch-actual sw) 'rvalue)
+                        ,@(make-jump-table cases default))
+               ,(compile-statement (c-switch-body sw)))))
+    ))
+
+(: switch-labels (-> c-switch (Values c-labeled-cases (Maybe c-labeled-default))))
+(define (switch-labels x)
+  (: cases c-labeled-cases)
+  (define cases null)
+  (: default (Maybe c-labeled-default))
+  (define default #f)
+  (: register-case! (-> c-labeled-case Void))
+  (define (register-case! x)    (set! cases (cons x cases)))
+  (: register-default! (-> c-labeled-default Void))
+  (define (register-default! x) (set! default x))
+  (for ([ y (c-stmt-descendants x #:stop-on? c-switch?)])
+    (match y
+      [(struct c-labeled-case (expected body)) (register-case! y)]
+      [(struct c-labeled-default (body))       (register-default! y)]
+      [_ (void)]
+      ))
+  (values cases default)
+  )
+
+(: cvalue->symbol (-> CValue Symbol))
+(define (cvalue->symbol cv)
+  (match cv
+    [(? integer?) (string->symbol (format "~v" cv))]
+    ))
+
+(: switch-case-label (-> c-labeled-case label))
+(define (switch-case-label c)
+  (destruct c-labeled-case c)
+  (match c-expected
+    [(struct c-const (cv))
+     (label (symbol-append 'switch-case-
+                           (cvalue->symbol (*switch-base*))
+                           (cvalue->symbol cv)))]
+    ))
+
+(: switch-default-label (-> c-labeled-default label))
+(define (switch-default-label x)
+  (destruct c-labeled-default x)
+  (label (symbol-append 'switch-default-
+                        (cvalue->symbol (*switch-base*))))
+  )
+
+; (: with-switch-base (-> (-> Pyramid) Pyramid))
+(define-syntax-rule (with-switch-base body ...)
+  (parameterize ([ *switch-base* (tick-counter! *switch-counter*)])
+    body ...))
+
+(: c-stmt-children (-> c-statement c-statements))
+(define (c-stmt-children x)
+  (match x
+    [(struct c-labeled (_ st)) (list st)]
+    [(struct c-labeled-case (_ st)) (list st)]
+    [(struct c-labeled-default (st)) (list st)]
+    [(struct c-expression-statement _) (list)]
+    [(struct c-switch (_ st)) (list st)]
+    [(struct c-if (_ st1 st2)) (list st1 st2)]
+    [(struct c-for (_ _ _ st)) (list st)]
+    [(struct c-while (_ st)) (list st)]
+    [(struct c-do-while (_ st)) (list st)]
+    [(struct c-goto _) (list)]
+    [(struct c-block (sts)) sts]
+    [(struct c-return _) (list)]
+    [(struct c-break _) (list)]
+    [(struct c-continue _) (list)]
+    ))
+
+(: c-stmt-descendants (-> c-statement [#:stop-on? (-> c-statement Boolean)] c-statements))
+(define (c-stmt-descendants x #:stop-on? [ stop-on? (λ (x) #f)])
+  (cons x (apply append (map (λ ([ st : c-statement ])
+                               (if (stop-on? st)
+                                   (list)
+                                   (c-stmt-descendants st #:stop-on? stop-on?)))
+                             (c-stmt-children x)))))
 
 (: compile-if          (-> c-if          Pyramid))
 (define (compile-if x)
@@ -384,9 +597,7 @@ Compilation strategy
 (: compile-for         (-> c-for         Pyramid))
 (define (compile-for x)
   (destruct c-for x)
-  (define init (if x-init
-                   (compile-declaration x-init)
-                   (pyr-begin (list))))
+  (define init (map compile-declaration x-init))
   (define post (if x-post
                    (compile-expression x-post 'rvalue)
                    (pyr-begin (list))))
@@ -396,7 +607,7 @@ Compilation strategy
 
   (with-breakpoint
     (quasiquote-pyramid
-     `(begin ,init
+     `(begin ,@init
              (%c-loop-forever
               ,(with-continuepoint
                  (quasiquote-pyramid
@@ -409,7 +620,7 @@ Compilation strategy
 (: compile-while       (-> c-while       Pyramid))
 (define (compile-while x)
   (destruct c-while x)
-  (compile-for (c-for #f x-pred #f x-body)))
+  (compile-for (c-for '() x-pred #f x-body)))
 
 (: compile-do-while    (-> c-do-while    Pyramid))
 (define (compile-do-while x)
@@ -424,7 +635,7 @@ Compilation strategy
 
 (: compile-goto        (-> c-goto        Pyramid))
 (define (compile-goto x)
-  (compile-jump (c-label (c-goto-target x))))
+  (compile-jump (c-goto-target x)))
 
 (: compile-block       (-> c-block       Pyramid))
 (define (compile-block x)
@@ -454,14 +665,14 @@ Compilation strategy
     [(list y ) y]
     [ys        (pyr-begin ys)]))
 
-(: compile-jump (-> c-label Pyramid))
+(: compile-jump (-> Symbol Pyramid))
 (define (compile-jump x)
   (expand-pyramid
-   `(asm (goto (label (quote ,(c-label-name x)))))))
+   `(asm (goto (label (quote ,x))))))
 
-(: make-c-label (-> Symbol c-label))
-(define (make-c-label name)
-  (c-label (make-label-name name)))
+;; (: make-c-label (-> Symbol c-label))
+;; (define (make-c-label name)
+;;   (c-labeled (make-label-name name)))
 
 (: with-escapepoint (-> Symbol Pyramid Pyramid))
 (define (with-escapepoint name exp)
@@ -484,9 +695,9 @@ Compilation strategy
   (match (resolve-type ty)
     [(struct c-type-fixed _) (make-field-table)]
     [(struct c-type-alias _) (error "type-field-table: Unexpected case" ty)]
-    [(struct c-type-struct (fs)) (struct-fields->field-table fs)]
+    [(struct c-type-struct (_ fs)) (struct-fields->field-table fs)]
     [(struct c-type-pointer _) (make-field-table)]
-    [(struct c-type-union (fs)) (union-fields->field-table fs)]
+    [(struct c-type-union (_ fs)) (union-fields->field-table fs)]
     [x (error "type-field-table: Unknown case" x)]
     ))
 
@@ -511,7 +722,7 @@ Compilation strategy
            [ size (type-size ty) ]
            [ fi (c-field-info os size)])
       (match* (name ty)
-        [(#f (struct c-type-union (fs2)))
+        [(#f (struct c-type-union (_ fs2)))
          (for ([ f2 fs2])
            (let ([ name2 (c-type-struct-field-name f2) ])
              (if name2
@@ -524,37 +735,37 @@ Compilation strategy
       ))
   ret)
 
-(: symbol-append (-> Symbol Symbol Symbol))
-(define (symbol-append a b)
-  (string->symbol (string-append (symbol->string a)
-                                 (symbol->string b))))
+(: assign-op->value-op (-> Symbol (U #f Symbol)))
+(define (assign-op->value-op op)
+  (match op
+    ['<<= '<<]
+    ['>>= '>>]
+    ['+=  '+]
+    ['-=  '-]
+    ['*=  '*]
+    ['/=  '/]
+    ['%=  '%]
+    ['\|\|= '\|\|]
+    ['\|= '\|]
+    ['^=  '^]
+    ['&&= '&&]
+    ['&=  '&]
+    ['=   'right]
+    [_    #f]
+    ))
 
 (: op->builtin (-> Symbol Pyramid))
 (define (op->builtin op)
   (define rvalue-op
     (match op
-      ['<<= '<<]
-      ['>>= '>>]
-      ['+=  '+]
-      ['-=  '-]
-      ['*=  '*]
-      ['/=  '/]
-      ['%=  '%]
-      ['\|\|= '\|\|]
-      ['\|= '\|]
-      ['^=  '^]
-      ['&&= '&&]
-      ['&=  '&]
-      ['=   'right]
-      ['++  '|+1|]
-      ['--  '|-1|]
-      [_    #f]))
-  (pyr-variable (symbol-append '%c-word-op (if rvalue-op rvalue-op op)))
+      [(? assign-op->value-op x) x]
+      [_ op]))
+  (pyr-variable (symbol-append '%c-word-op rvalue-op))
   )
 
 (: assign-ops (Setof Symbol))
 ;(define assign-ops (set))
-(define assign-ops (apply set '(<<= >>= += -= *= /= %= \|\|= \|= ^= &&= &= = ++ --)))
+(define assign-ops (apply set '(<<= >>= += -= *= /= %= \|\|= \|= ^= &&= &= =)))
 
 (: wants-lvalue? (-> Symbol Boolean))
 (define (wants-lvalue? op)
@@ -562,6 +773,5 @@ Compilation strategy
 
 (: register-builtins! (-> Void))
 (define (register-builtins!)
-  (define t-int (c-type-fixed #t 256))
   (register-variable! '__builtin_set_test_result (c-signature (c-type-void) (list (c-sigvar 'expected t-int))))
   )

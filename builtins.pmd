@@ -49,8 +49,8 @@
 (defmacro (%c-word-op<= x y) `(%#-bool->word (%#-<= ,x ,y)))
 (defmacro (%c-word-op< x y)  `(%#-bool->word (%#-<  ,x ,y)))
 (defmacro (%c-word-op> x y)  `(%#-bool->word (%#->  ,x ,y)))
-(defmacro (%c-word-op+ x y)  `(%#-+  ,x ,y))
-(defmacro (%c-word-op- x y)  `(%#--  ,x ,y))
+(defmacro (%c-word-opraw+ x y) `(%#-+  ,x ,y))
+(defmacro (%c-word-opraw- x y) `(%#--  ,x ,y))
 (defmacro (%c-word-op* x y)  `(%#-*  ,x ,y))
 (defmacro (%c-word-op/ x y)  `(%#-u/ ,x ,y))
 (defmacro (%c-word-op% x y)  `(%#-u% ,x ,y))
@@ -107,3 +107,6 @@
 (defmacro (%c-define-union name init)
   `(begin (define ,name ,init)
           (%c-noinline ,name)))
+
+(defmacro (%c-case e . xs)
+  `(%#-case ,e ,@xs))

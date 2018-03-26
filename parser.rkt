@@ -1,164 +1,277 @@
 #lang brag
 
-c: top_level_declaration*
+; Reference: https://www.lysator.liu.se/c/ANSI-C-grammar-y.html
 
-@top_level_declaration: declaration | type_declaration | function_declaration
+translation_unit: ( external_declaration | /";") *
 
-declaration:
-  type (declaration_variable COMMA)* declaration_variable /SEMI
-| union /SEMI
+primary_expression
+: IDENTIFIER
+| INTEGER
+| STRING_LITERAL
+| "(" expression ")"
 
-declaration_variable: variable [/"=" expression]
+postfix_expression
+: primary_expression
+| postfix_expression "[" expression "]"
+| postfix_expression "(" [ argument_expression_list ] ")"
+| postfix_expression "." IDENTIFIER
+| postfix_expression "->" IDENTIFIER
+| postfix_expression "++"
+| postfix_expression "--"
 
-@type_declaration: typedef
+argument_expression_list
+: assignment_expression
+| argument_expression_list ',' assignment_expression
 
-function_declaration: function_modifiers type identifier /LPAREN [function_arguments] /RPAREN /LCURLY sequence /RCURLY
+unary_expression
+: postfix_expression
+| "++" unary_expression
+| "--" unary_expression
+| unary_operator cast_expression
+| SIZEOF unary_expression
+| SIZEOF "(" type_name ")"
 
-function_modifiers: (extern | static)*
-extern: /EXTERN STRING
-static: /STATIC
+unary_operator
+: "&"
+| "*"
+| "+"
+| "-"
+| "~"
+| "!"
 
-/function_arguments: (function_argument /COMMA)* function_argument
+cast_expression
+: unary_expression
+| "(" type_name ")" cast_expression
 
-function_argument: type variable
+multiplicative_expression
+: cast_expression
+| multiplicative_expression "*" cast_expression
+| multiplicative_expression "/" cast_expression
+| multiplicative_expression "%" cast_expression
 
-@ambiguous_binop_op: "*"
+additive_expression
+: multiplicative_expression
+| additive_expression "+" multiplicative_expression
+| additive_expression "-" multiplicative_expression
 
-@unambiguous_binop_op:
-  "."
-| "->"
-| "<<="
-| ">>="
-| "+="
-| "-="
+shift_expression
+: additive_expression
+| shift_expression "<<" additive_expression
+| shift_expression ">>" additive_expression
+
+relational_expression
+: shift_expression
+| relational_expression "<" shift_expression
+| relational_expression ">" shift_expression
+| relational_expression "<=" shift_expression
+| relational_expression ">=" shift_expression
+
+equality_expression
+: relational_expression
+| equality_expression "==" relational_expression
+| equality_expression "!=" relational_expression
+
+and_expression
+: equality_expression
+| and_expression "&" equality_expression
+
+exclusive_or_expression
+: and_expression
+| exclusive_or_expression "^" and_expression
+
+inclusive_or_expression
+: exclusive_or_expression
+| inclusive_or_expression "|" exclusive_or_expression
+
+logical_and_expression
+: inclusive_or_expression
+| logical_and_expression "&&" inclusive_or_expression
+
+logical_or_expression
+: logical_and_expression
+| logical_or_expression "||" logical_and_expression
+
+conditional_expression
+: logical_or_expression
+| logical_or_expression "?" expression ":" conditional_expression
+
+assignment_expression
+: conditional_expression
+| unary_expression assignment_operator assignment_expression
+
+assignment_operator
+: "="
 | "*="
 | "/="
 | "%="
-| "||="
-| "|="
-| "^="
-| "&&="
+| "+="
+| "-="
+| "<<="
+| ">>="
 | "&="
-| "<<"
-| ">>"
-| "+"
-| "-"
-| "/"
-| "%"
-| "||"
-| "|"
-| "^"
-| "&&"
-| "&"
-| "!="
-| "<="
-| "<"
-| ">="
-| ">"
-| "=="
-| "="
+| "^="
+| "|="
 
-@binop_op: ambiguous_binop_op | unambiguous_binop_op
+expression
+: assignment_expression
+| expression ',' assignment_expression
 
-@unop_op:
-  "++"
-| "--"
-| "~"
-| "-"
-| "!"
-| "*"
-| "&"
+constant_expression
+: conditional_expression
 
-@postop_op: "++" | "--"
+declaration
+: declaration_specifiers [init_declarator_list] /";"
 
-@simple_expression:
-  function_call
-| integer
-| char
-| variable
-| /LPAREN expression /RPAREN
+declaration_specifiers: (storage_class_specifier | type_specifier | type_qualifier)+
 
-@unambiguous_expression:
-  simple_expression
-| ternary
-| unop
-| binop_unambiguous
-| postop
-| c_cast
+init_declarator_list
+: [init_declarator_list /","] init_declarator
 
-@ambiguous_expression:
-  binop
+init_declarator
+: declarator
+| declarator /"=" initializer
 
-@expression: unambiguous_expression | ambiguous_expression
+storage_class_specifier
+: TYPEDEF
+| EXTERN
+| STATIC
+| AUTO
+| REGISTER
 
-integer: INTEGER
-char: ONECHAR
-variable: [variable_modifier] identifier
-variable_modifier: "*"
-ternary: expression /"?" expression /COLON expression
-binop: expression binop_op expression
-binop_unambiguous: unambiguous_expression unambiguous_binop_op ambiguous_expression
-unop: unop_op expression
-postop: expression postop_op
-function_call: simple_expression /LPAREN [(expression /COMMA)* expression] /RPAREN
+type_specifier
+: VOID
+| CHAR
+| SHORT
+| INT
+| LONG
+| FLOAT
+| DOUBLE
+| SIGNED
+| UNSIGNED
+| struct_or_union_specifier
+| enum_specifier
+| TYPE_NAME
 
-c_cast: /LPAREN type /RPAREN expression
+struct_or_union_specifier
+: (STRUCT | UNION) /[ IDENTIFIER ] [ "{" struct_declaration* "}" ]
 
-block: /LCURLY statement* /RCURLY
-sequence: statement*
+struct_declaration
+: specifier_qualifier_list [ struct_declarator_list ] /";"
 
-@statement:
-  label_definition
-| switch
-| if
-| for
-| while
-| do_while
-| goto
-| block
-| return
-| break
-| continue
-| declaration
+specifier_qualifier_list: (type_specifier | type_qualifier)*
+
+struct_declarator_list: ( struct_declarator /"," )* struct_declarator
+
+struct_declarator
+: declarator
+| /":" constant_expression
+| declarator /":" constant_expression
+
+enum_specifier
+: /ENUM [ IDENTIFIER ] [/"{" enumerator_list /"}"]
+| /ENUM [ IDENTIFIER ]
+| /ENUM                [/"{" enumerator_list /"}"]
+
+enumerator_list
+: [ enumerator_list "," ] enumerator
+
+enumerator
+: IDENTIFIER ["=" constant_expression]
+
+type_qualifier
+: CONST
+| VOLATILE
+
+declarator
+: [ pointer ] direct_declarator
+
+direct_declarator
+: IDENTIFIER
+| "(" declarator ")"
+| direct_declarator "[" constant_expression "]"
+| direct_declarator "[" "]"
+| direct_declarator "(" parameter_type_list ")"
+| direct_declarator "(" identifier_list ")"
+| direct_declarator "(" ")"
+
+pointer
+: /"*" type_qualifier* [ pointer ]
+
+parameter_type_list
+: parameter_list [ "," ELLIPSIS ]
+
+parameter_list: ( parameter_declaration /",")* parameter_declaration
+
+parameter_declaration
+: declaration_specifiers declarator
+| declaration_specifiers abstract_declarator
+| declaration_specifiers
+
+identifier_list: (IDENTIFIER /",")* IDENTIFIER
+
+type_name
+: specifier_qualifier_list [ abstract_declarator ]
+
+abstract_declarator
+: pointer
+| direct_abstract_declarator
+| pointer direct_abstract_declarator
+
+direct_abstract_declarator
+: "(" abstract_declarator ")"
+| "[" [ constant_expression ] "]"
+| direct_abstract_declarator "[" [ constant_expression ]"]"
+| "(" [ parameter_type_list ] ")"
+| direct_abstract_declarator "(" parameter_type_list ")"
+
+initializer
+: assignment_expression
+| /"{" initializer_list /[","] /"}"
+
+initializer_list
+: [ initializer_list "," ] initializer
+
+statement
+: labeled_statement
+| compound_statement
 | expression_statement
-| empty
+| selection_statement
+| iteration_statement
+| jump_statement
 
-expression_statement: expression /SEMI
-label_definition: identifier /COLON statement
-goto: /GOTO identifier /SEMI
-return: /RETURN expression /SEMI
-break: /BREAK /SEMI
-continue: /CONTINUE /SEMI
-empty: /SEMI
+labeled_statement
+: IDENTIFIER /":" statement
+| CASE constant_expression /":" statement
+| DEFAULT /":" statement
 
-switch: /SWITCH /LPAREN expression /RPAREN /LCURLY (switch_case | switch_default)* /RCURLY
-switch_case: /CASE expression /COLON sequence
-switch_default: /DEFAULT /COLON sequence
-if: /IF /LPAREN expression /RPAREN statement [/ELSE statement]
-for: /FOR /LPAREN (declaration | empty) ((expression /SEMI)| empty) [expression] /RPAREN statement
-while: /WHILE /LPAREN expression /RPAREN statement
-do_while: /DO statement /WHILE /LPAREN expression /RPAREN /SEMI
+compound_statement
+: "{" (declaration | statement)* "}"
 
-struct: /STRUCT identifier /LCURLY declaration* /RCURLY
-union: /UNION [ identifier ] /LCURLY declaration* /RCURLY [ identifier* ]
+declaration_list: declaration*
 
-@type:
-  unsigned_char
-| unsigned_int
-| signed_char
-| signed_int
-| void
-| struct
-| union
-| identifier
-| /CONST type
-| type /"*"
+expression_statement
+: [ expression ] /";"
 
-@identifier: IDENTIFIER
-unsigned_char: /UNSIGNED /CHAR | /CHAR
-unsigned_int: /UNSIGNED /INT
-signed_char: /SIGNED /CHAR
-signed_int: /SIGNED /INT | /INT
-void: /VOID
+selection_statement
+: IF /"(" expression /")" statement
+| IF /"(" expression /")" statement /ELSE statement
+| SWITCH /"(" expression /")" statement
 
-typedef: /TYPEDEF type identifier /SEMI
+iteration_statement
+: WHILE /"(" expression /")" statement
+| DO statement /WHILE /"(" expression /")" /";"
+| FOR /"(" declaration expression_statement [expression] /")" statement
+
+jump_statement
+: GOTO IDENTIFIER /";"
+| CONTINUE /";"
+| BREAK /";"
+| RETURN /";"
+| RETURN expression /";"
+
+external_declaration
+: function_definition
+| declaration
+
+function_definition
+: [declaration_specifiers] declarator [ declaration_list ] compound_statement
