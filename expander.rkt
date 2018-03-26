@@ -119,10 +119,8 @@
     )
   (define-syntax-class init-declarator-list
     #:attributes (type->declarations)
-    [pattern ((~literal init_declarator_list) decl:init-declarator)
-             #:with type->declarations #'(list decl.type->declaration)]
-    [pattern ((~literal init_declarator_list) xs:init-declarator-list decl:init-declarator)
-             #:with type->declarations #'(append xs.declarations (list decl.type->declaration))]
+    [pattern ((~literal init_declarator_list) decl:init-declarator ...)
+             #:with type->declarations #'(list decl.type->declaration ...)]
     )
   (define-syntax-class init-declarator
     #:attributes (type->declaration)

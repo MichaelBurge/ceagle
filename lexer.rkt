@@ -61,7 +61,7 @@
    [(from/to "//" "\n") (token 'SCOMMENT   lexeme #:skip? #t)]
    [(from/to "/*" "*/") (token 'MCOMMENT   lexeme #:skip? #t)]
    ; Constants
-   [(:: "0x" (:+ hex) "ULL") (token 'INTEGER (string->number (substring lexeme 2 (- (string-length lexeme) 3))))]
+   [(:: "0x" (:+ hex) "ULL") (token 'INTEGER (string->number (substring lexeme 2 (- (string-length lexeme) 3)) 16))]
    [(:: "0x" (:+ hex))       (token 'INTEGER (string->number (substring lexeme 2) 16))]
    [(:: (:+ numeric)  "ULL") (token 'INTEGER (string->number (substring lexeme 0 (- (string-length lexeme) 3))))]
    [(:+ numeric)             (token 'INTEGER (string->number lexeme))]

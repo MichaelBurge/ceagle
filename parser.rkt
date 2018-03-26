@@ -122,8 +122,7 @@ declaration
 
 declaration_specifiers: (storage_class_specifier | type_specifier | type_qualifier)+
 
-init_declarator_list
-: [init_declarator_list /","] init_declarator
+init_declarator_list: [ init_declarator /"," ]* init_declarator
 
 init_declarator
 : declarator
