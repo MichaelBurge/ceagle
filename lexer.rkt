@@ -67,7 +67,7 @@
    [(:+ numeric)             (token 'INTEGER (string->number lexeme))]
    [(:: "'" (char-complement "'") "'") (token 'INTEGER (char->integer (string-ref lexeme 1)))]
    ["'\\''"                  (token 'ONECHAR (char->integer #\'))]
-   [(:: "\""                 (:* (char-complement "\"")) "\"") (token 'STRING lexeme)]
+   [(:: "\""                 (:* (char-complement "\"")) "\"") (token 'STRING_LITERAL lexeme)]
    ; Punctuation
    ["{"   (begin (lbrace) lexeme )]
    ["}"   (begin (rbrace) lexeme )]

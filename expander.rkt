@@ -354,7 +354,7 @@
     )
   (define-syntax-class type-name
     #:attributes (type)
-    [pattern ((~literal type_name) decl:abstract-declarator) #:with type #'decl.type]
+    [pattern ((~literal type_name) specs:specifier-qualifier-list) #:with type #'specs.type]
     [pattern ((~literal type_name) specs:specifier-qualifier-list decl:abstract-declarator) #:with type #'(decl.type-modifier specs.type)]
     )
 
@@ -366,18 +366,17 @@
     )
 
   (define-syntax-class type-qualifier
-    #:attributes (qualifier)
+    #:attributes (specifier)
     #:datum-literals (CONST VOLATILE)
-    [pattern ((~literal type_qualifier) CONST) #:with qualifier 'const]
-    [pattern ((~literal type_qualifier) VOLATILE) #:with qualifier 'volatile]
+    [pattern ((~literal type_qualifier) CONST) #:with specifier #''const]
+    [pattern ((~literal type_qualifier) VOLATILE) #:with specifier #''volatile]
     )
 
   (define-syntax-class direct_abstract_declarator)
 
   (define-syntax-class argument-expression-list
     #:attributes (expressions)
-    [pattern ((~literal argument_expression_list) expr:assignment-expression) #:with expressions #'(list expr.expression)]
-    [pattern ((~literal argument_expression_list) (lefts:assignment-expression ",") ... right:assignment-expression) #:with expressions #'(list lefts.expression ... right.expression)]
+    [pattern ((~literal argument_expression_list) exprs:assignment-expression ...) #:with expressions #'(list exprs.expression ...)]
     )
   (define-syntax-class specifier-qualifier-list
     #:attributes (specifiers type)
@@ -488,6 +487,8 @@
       ['int ty]
       ['signed ty]
       ['typedef ty] ; Ignore typedef, but we still need to determine a type from the other specifiers.
+      ['const ty ]
+      ['static ty ]
       ['unsigned
        (match ty
          [(struct c-type-fixed _) (begin (set-c-type-fixed-signed?! ty #f)

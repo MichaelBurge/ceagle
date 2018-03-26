@@ -36,16 +36,15 @@ typedef struct move {
 } move;
 
 typedef gamestate iterator;
-typedef int piece;
 typedef int position;
 
-const piece PIECE_EMPTY  = 0;
-const piece PIECE_ROOK   = 1;
-const piece PIECE_KNIGHT = 2;
-const piece PIECE_BISHOP = 3;
-const piece PIECE_QUEEN  = 4;
-const piece PIECE_KING   = 5;
-const piece PIECE_PAWN   = 6;
+const int PIECE_EMPTY  = 0;
+const int PIECE_ROOK   = 1;
+const int PIECE_KNIGHT = 2;
+const int PIECE_BISHOP = 3;
+const int PIECE_QUEEN  = 4;
+const int PIECE_KING   = 5;
+const int PIECE_PAWN   = 6;
 
 const int VALUE_PAWN   = 100;
 const int VALUE_KNIGHT = 300;
@@ -1403,12 +1402,12 @@ static move parse_move(const char* buffer)
 /* } */
 
 // Used when generating pf_apply_move
-extern "C" void custom_main(const char *g_str, const char *m_str, char *g_dest)
-{
-  gamestate g = parse_fen(g_str);
-  move m = parse_move(m_str);
-  if (! g.is_white)
-    m = swap_move(m);
-  gamestate g2 = apply_move(g, m);
-  print_fen(g2, g_dest);
-}
+/* extern "C" void custom_main(const char *g_str, const char *m_str, char *g_dest) */
+/* { */
+/*   gamestate g = parse_fen(g_str); */
+/*   move m = parse_move(m_str); */
+/*   if (! g.is_white) */
+/*     m = swap_move(m); */
+/*   gamestate g2 = apply_move(g, m); */
+/*   print_fen(g2, g_dest); */
+/* } */

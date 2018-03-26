@@ -19,9 +19,7 @@ postfix_expression
 | postfix_expression "++"
 | postfix_expression "--"
 
-argument_expression_list
-: assignment_expression
-| argument_expression_list ',' assignment_expression
+argument_expression_list: [ assignment_expression /"," ]* assignment_expression
 
 unary_expression
 : postfix_expression
