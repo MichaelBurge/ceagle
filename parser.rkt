@@ -268,7 +268,12 @@ jump_statement
 
 external_declaration
 : function_definition
+| any_include
 | declaration
+
+any_include: require_system
+
+@require_system: REQUIRE_SYSTEM
 
 function_definition
 : [declaration_specifiers] declarator [ declaration_list ] compound_statement

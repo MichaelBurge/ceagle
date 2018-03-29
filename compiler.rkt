@@ -66,7 +66,6 @@ Switch Statements
                ty)
     )
 
-
   (: register-type! (-> Symbol c-type c-typespace Void))
   (define (register-type! name ty typespace)
     (maybe-register-type! ty)
@@ -171,6 +170,7 @@ Switch Statements
       [(struct c-signature _) 32]
       [(struct c-type-pointer _) 32]
       [(struct c-type-union (_ fields)) (fields-max-size fields)]
+      [(struct c-signature _) 32 ]
       [_ (error "type-size: Unknown case" x)]))
 
   (: fields-max-size (-> c-type-struct-fields Size))
@@ -178,6 +178,7 @@ Switch Statements
     (apply max (map (λ ([x : c-type-struct-field ])
                       (type-size (c-type-struct-field-type x)))
                     fields)))
+
   )
 (require 'typechecker)
 
@@ -187,8 +188,8 @@ Switch Statements
 (: *switch-base* (Parameterof Counter))
 (define *switch-base* (make-parameter 0))
 
-(: compile-translation-unit (-> c-unit Pyramid))
-(define (compile-translation-unit x)
+(: compile-translation-unit (-> c-unit Boolean Pyramid))
+(define (compile-translation-unit x execute?)
   (destruct c-unit x)
   (verbose-section "Ceagle AST" VERBOSITY-LOW
                    (pretty-print x))
@@ -196,17 +197,19 @@ Switch Statements
   (let ([ decls     (pyr-begin (map compile-declaration x-decls)) ]
         [ call-main (c-function-call (c-variable 'main) (list))])
     (quasiquote-pyramid
-     `(begin (include ceagle "builtins.pmd")
+     `(begin (require ceagle "builtins.pmd")
              ,decls
-             (%-box ,(compile-expression call-main 'rvalue))))))
+             ,(if execute?
+                  (quasiquote-pyramid `(%-box ,(compile-expression call-main 'rvalue)))
+                  (pyr-begin '()))))))
 
 (: compile-declaration (-> c-declaration Pyramid))
 (define (compile-declaration x)
   (match x
-    [(struct c-decl-var _)  (compile-decl-var x)]
-    [(struct c-decl-type _) (compile-decl-type x)]
-    [(struct c-decl-func _) (compile-decl-func x)]
-    [_                      (error "compile-decl: unknown case" x)]))
+    [(struct c-decl-var     _) (compile-decl-var     x)]
+    [(struct c-decl-type    _) (compile-decl-type    x)]
+    [(struct c-decl-func    _) (compile-decl-func    x)]
+    [_                         (error "compile-decl: unknown case" x)]))
 
 (: compile-decl-var (-> c-decl-var Pyramid))
 (define (compile-decl-var x)

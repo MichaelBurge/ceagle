@@ -14,9 +14,7 @@
 
   (define-syntax-class external-declaration
     #:attributes (statements)
-    [pattern ((~literal external_declaration) decl:function-definition)
-             #:with statements #'decl.statements]
-    [pattern ((~literal external_declaration) decl:declaration)
+    [pattern ((~literal external_declaration) (~or* decl:function-definition decl:declaration decl:any-include))
              #:with statements #'decl.statements]
     )
 
@@ -452,6 +450,12 @@
     [pattern ((~literal enum_specifier) x ...) #:with type #'(error "Parsing enum-specifier: Unhandled case")]
     )
 
+  (define-syntax-class any-include
+    #:attributes (statements)
+    [pattern ((~literal any_include) path:string)
+             #:with statements #''()]
+    )
+
   (define-syntax-class assignment-operator
     #:attributes (operator)
     [pattern ((~literal assignment_operator) "=") #:with operator '=]
@@ -466,6 +470,7 @@
     [pattern ((~literal assignment_operator) "^=") #:with operator '^=]
     [pattern ((~literal assignment_operator) "|=") #:with operator '\|= ]
     )
+
   )
 
 (define-syntax (expand-translation-unit stx)

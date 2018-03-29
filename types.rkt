@@ -1,5 +1,6 @@
 #lang typed/racket
 
+(require typed/racket/unsafe)
 (require (submod pyramid/types common))
 
 (provide (all-defined-out))
@@ -106,3 +107,5 @@
 
 (: make-type-registry (-> TypeRegistry))
 (define make-type-registry make-hash)
+
+(define-type CQ Sexp)

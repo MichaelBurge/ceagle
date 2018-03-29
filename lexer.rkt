@@ -53,17 +53,21 @@
 (define (rbrace)
   (set! *brace-level* (- *brace-level* 1)))
 
+(define-syntax-rule (between a b) (substring lexeme a (- (string-length lexeme) b)))
+
 (define c-lexer
   (lexer-src-pos
    [(eof)               eof]
+   ; Preprocessor
+   [(:: "#require <" (:* (char-complement ">")) ">") (token 'REQUIRE_SYSTEM (between 10 1))]
    ; Syntax regions
    [(:+ whitespace)     (token 'WHITESPACE lexeme #:skip? #t)]
    [(from/to "//" "\n") (token 'SCOMMENT   lexeme #:skip? #t)]
    [(from/to "/*" "*/") (token 'MCOMMENT   lexeme #:skip? #t)]
    ; Constants
-   [(:: "0x" (:+ hex) "ULL") (token 'INTEGER (string->number (substring lexeme 2 (- (string-length lexeme) 3)) 16))]
+   [(:: "0x" (:+ hex) "ULL") (token 'INTEGER (string->number (between 2 3) 16))]
    [(:: "0x" (:+ hex))       (token 'INTEGER (string->number (substring lexeme 2) 16))]
-   [(:: (:+ numeric)  "ULL") (token 'INTEGER (string->number (substring lexeme 0 (- (string-length lexeme) 3))))]
+   [(:: (:+ numeric)  "ULL") (token 'INTEGER (string->number (between 0 3)))]
    [(:+ numeric)             (token 'INTEGER (string->number lexeme))]
    [(:: "'" (char-complement "'") "'") (token 'INTEGER (char->integer (string-ref lexeme 1)))]
    ["'\\''"                  (token 'ONECHAR (char->integer #\'))]
