@@ -1,6 +1,7 @@
 #lang typed/racket
 
 (require "types.rkt")
+(require "simplifier.rkt")
 (require (submod pyramid/types ast))
 (require pyramid/ast)
 (require pyramid/parser)
@@ -124,6 +125,52 @@ Switch Statements
                                                                       (λ () (error "resolve-type: Unknown type" name typespace))))]
       [_ ty]
       ))
+  (: type-field-table (-> c-type FieldTable))
+  (define (type-field-table ty)
+    (match (resolve-type ty)
+      [(struct c-type-fixed _) (make-field-table)]
+      [(struct c-type-alias _) (error "type-field-table: Unexpected case" ty)]
+      [(struct c-type-struct (_ fs)) (struct-fields->field-table fs)]
+      [(struct c-type-pointer _) (make-field-table)]
+      [(struct c-type-union (_ fs)) (union-fields->field-table fs)]
+      [x (error "type-field-table: Unknown case" x)]
+      ))
+
+  (: union-fields->field-table (-> c-type-struct-fields FieldTable))
+  (define (union-fields->field-table fs)
+    (define ret (make-field-table))
+    (define size (fields-max-size fs))
+    (for ([ f fs ])
+      (match (c-type-struct-field-name f)
+        [#f (error "union-fields->field-table: Nested anonymous unions not supported" f)]
+        [(? symbol? name) (hash-set! ret name (c-field-info 0 (c-type-struct-field-type f)))]
+        ))
+    ret)
+
+  (: struct-fields->field-table (-> c-type-struct-fields FieldTable))
+  (define (struct-fields->field-table fs)
+    (define ret (make-field-table))
+    (define os 0)
+    (for ([ f fs ])
+      (let* ([ ty (c-type-struct-field-type f) ]
+             [ name (c-type-struct-field-name f) ]
+             [ size (type-size ty)]
+             [ fi (c-field-info os ty)])
+        (match* (name ty)
+          [(#f (struct c-type-union (_ fs2)))
+           (for ([ f2 fs2])
+             (let* ([ name2 (c-type-struct-field-name f2) ]
+                    [ ty2 (c-type-struct-field-type f2)]
+                    [ fi2 (c-field-info os ty2)])
+               (if name2
+                   (hash-set! ret name2 fi2)
+                   (error "struct-fields->field-table: Nested anonymous unions not supported" f2))))]
+          [(#f _) (error "struct-fields->field-table: Only unions can be unnamed struct memebers" f)]
+          [((? symbol? name) _)  (hash-set! ret name fi)]
+          )
+        (set! os (+ os size))
+        ))
+    ret)
 
   (: expression-type (-> c-expression c-type))
   (define (expression-type exp)
@@ -145,14 +192,11 @@ Switch Statements
          [_ (error "expression-type: Unknown function call" func)]
          )]
       [(struct c-field-access (source name))
-       (match (resolve-type (expression-type source))
-         [(struct c-type-struct (_ fields))
-          (match (assoc name (map (λ ([ f : c-type-struct-field ]) (cons (c-type-struct-field-name f)
-                                               (c-type-struct-field-type f)))
-                                  fields))
-            [#f (error "expression-type: No field with name found" source name fields)]
-            [(cons _ (? c-type? ty)) ty])]
-         [ ty (error "expression-type: Attempted to access a field from a non-struct" ty source name)])]
+       (define src-ty (expression-type source))
+       (define ft (type-field-table src-ty))
+       (define fi (hash-ref ft name (λ () (error "expression-type: No field with name found" source name ft))))
+       (c-field-info-type fi)
+       ]
       [_ (error "expression-type: Unhandled case" exp)]
       ))
 
@@ -190,8 +234,11 @@ Switch Statements
 
 (: compile-translation-unit (-> c-unit Boolean Pyramid))
 (define (compile-translation-unit x execute?)
-  (destruct c-unit x)
   (verbose-section "Ceagle AST" VERBOSITY-LOW
+                   (pretty-print x))
+  (set! x (simplify x))
+  (destruct c-unit x)
+  (verbose-section "Ceagle Simplified AST" VERBOSITY-MEDIUM
                    (pretty-print x))
   (register-builtins!)
   (let ([ decls     (pyr-begin (map compile-declaration x-decls)) ]
@@ -466,7 +513,7 @@ Switch Statements
     (quasiquote-pyramid
      `(%c-struct-field ,(compile-expression x-source 'lvalue)
                        (%-unbox ,(pyr-const info-offset))
-                       (%-unbox ,(pyr-const info-size)))))
+                       (%-unbox ,(pyr-const (type-size info-type))))))
 
   (match val-ty
     ['lvalue ptr-exp]
@@ -548,6 +595,10 @@ Switch Statements
      (label (symbol-append 'switch-case-
                            (cvalue->symbol (*switch-base*))
                            (cvalue->symbol cv)))]
+    [(struct c-variable (name))
+     (label (symbol-append 'switch-case-
+                           (cvalue->symbol (*switch-base*))
+                           name))]
     ))
 
 (: switch-default-label (-> c-labeled-default label))
@@ -693,51 +744,6 @@ Switch Statements
 (define (with-breakpoint exp)
   (with-escapepoint 'break exp))
 
-(: type-field-table (-> c-type FieldTable))
-(define (type-field-table ty)
-  (match (resolve-type ty)
-    [(struct c-type-fixed _) (make-field-table)]
-    [(struct c-type-alias _) (error "type-field-table: Unexpected case" ty)]
-    [(struct c-type-struct (_ fs)) (struct-fields->field-table fs)]
-    [(struct c-type-pointer _) (make-field-table)]
-    [(struct c-type-union (_ fs)) (union-fields->field-table fs)]
-    [x (error "type-field-table: Unknown case" x)]
-    ))
-
-(: union-fields->field-table (-> c-type-struct-fields FieldTable))
-(define (union-fields->field-table fs)
-  (define ret (make-field-table))
-  (define size (fields-max-size fs))
-  (for ([ f fs ])
-    (match (c-type-struct-field-name f)
-      [#f (error "union-fields->field-table: Nested anonymous unions not supported" f)]
-      [(? symbol? name) (hash-set! ret name (c-field-info 0 size))]
-      ))
-  ret)
-
-(: struct-fields->field-table (-> c-type-struct-fields FieldTable))
-(define (struct-fields->field-table fs)
-  (define ret (make-field-table))
-  (define os 0)
-  (for ([ f fs ])
-    (let* ([ ty (c-type-struct-field-type f) ]
-           [ name (c-type-struct-field-name f) ]
-           [ size (type-size ty) ]
-           [ fi (c-field-info os size)])
-      (match* (name ty)
-        [(#f (struct c-type-union (_ fs2)))
-         (for ([ f2 fs2])
-           (let ([ name2 (c-type-struct-field-name f2) ])
-             (if name2
-                 (hash-set! ret name2 fi)
-                 (error "struct-fields->field-table: Nested anonymous unions not supported" f2))))]
-        [(#f _) (error "struct-fields->field-table: Only unions can be unnamed struct memebers" f)]
-        [((? symbol? name) _)  (hash-set! ret name fi)]
-        )
-      (set! os (+ os size))
-      ))
-  ret)
-
 (: assign-op->value-op (-> Symbol (U #f Symbol)))
 (define (assign-op->value-op op)
   (match op
@@ -777,4 +783,8 @@ Switch Statements
 (: register-builtins! (-> Void))
 (define (register-builtins!)
   (register-variable! '__builtin_set_test_result (c-signature (c-type-void) (list (c-sigvar 'expected t-int))))
+  (register-variable! '__builtin_ctzll           (c-signature t-int (list (c-sigvar 'x t-int))))
+  (register-variable! '__builtin_clzll           (c-signature t-int (list (c-sigvar 'x t-int))))
+  (register-variable! '__builtin_bswap64         (c-signature t-int (list (c-sigvar 'x t-int))))
+  (register-variable! '__builtin_trap            (c-signature (c-type-void) (list (c-sigvar 'x t-int))))
   )

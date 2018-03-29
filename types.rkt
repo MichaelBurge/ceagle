@@ -83,7 +83,7 @@
 (struct c-array-access c-expression ([ array : c-expression ] [ index : c-expression ]) #:transparent)
 (struct c-expression-sequence c-expression ([ exps : c-expressions ]) #:transparent)
 
-(struct c-field-info ([ offset : Integer ] [ size : Integer ]) #:transparent)
+(struct c-field-info ([ offset : Integer ] [ type : c-type ]) #:transparent)
 
 (define-type c-value-type (U 'lvalue 'rvalue))
 (define-type c-statements (Listof c-statement))
@@ -94,6 +94,7 @@
 (define-type c-signatures  (Listof c-signature))
 (define-type c-labeled-cases (Listof c-labeled-case))
 (define-type c-labeled-defaults (Listof c-labeled-default))
+(define-type c-decl-vars (Listof c-decl-var))
 
 (define-type FieldTable (HashTable Symbol c-field-info))
 (define-type TypeRegistry (HashTable Symbol c-type))
