@@ -372,7 +372,9 @@ Switch Statements
     [(? c-function-call?) (compile-function-call x val-ty)]
     [(? c-field-access?)  (compile-field-access  x val-ty)]
     [(? c-cast?)          (compile-cast          x val-ty)]
+    [(? c-array-access?)  (compile-array-access  x val-ty)]
     [(? c-expression-sequence?) (compile-expression-sequence x val-ty)]
+    [(? c-expression-array?) (compile-expression-array x val-ty)]
     [_                    (error "compile-expression: Unknown case" x)]))
 
 (: compile-const (-> c-const c-value-type Pyramid))
@@ -526,6 +528,14 @@ Switch Statements
   (compile-expression x-exp val-ty)
   )
 
+(: compile-array-access (-> c-array-access c-value-type Pyramid))
+(define (compile-array-access x val-ty)
+  (destruct c-array-access x)
+  (assert (equal? val-ty 'rvalue)) ; TODO: lvalue
+  (quasiquote-pyramid
+   `(%#-mem-read ,(compile-expression x-array 'rvalue) ,(compile-expression x-index 'rvalue)))
+  )
+
 (: compile-expression-sequence (-> c-expression-sequence c-value-type Pyramid))
 (define (compile-expression-sequence x val-ty)
   (destruct c-expression-sequence x)
@@ -533,6 +543,17 @@ Switch Statements
    `(begin ,@(map (λ ([ exp : c-expression ])
                     (compile-expression exp val-ty))
                   x-exps)))
+  )
+
+(: compile-expression-array (-> c-expression-array c-value-type Pyramid))
+(define (compile-expression-array x val-ty)
+  (destruct c-expression-array x)
+  (assert (equal? val-ty 'rvalue))
+  (quasiquote-pyramid
+   `(%#-mem-alloc-init (%#-* (%-unbox WORD) (%-unbox ,(pyr-const (length x-exps))))
+                       ,@(map (λ ([ exp : c-expression ])
+                                (compile-expression exp 'rvalue))
+                              x-exps)))
   )
 
 ; See "Switch Statements"

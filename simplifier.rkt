@@ -32,6 +32,7 @@
          [(struct c-sizeof ((? c-expression? exp))) (c-sizeof (tf exp))]
          [(struct c-array-access (arr idx)) (c-array-access (tf arr) (tf idx))]
          [(struct c-expression-sequence (exps)) (c-expression-sequence (map tf exps))]
+         [(struct c-expression-array (exps)) (c-expression-array (map tf exps))]
          ))))
 
 (: lift-statement-transformer (Endo (Endo c-statement)))

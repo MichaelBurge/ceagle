@@ -51,9 +51,9 @@
     [pattern ((~literal direct_declarator) name-sym:identifier)
              #:with name #'(quote name-sym)
              #:with sigvars '()]
-    [pattern ((~literal direct_declarator) "[" (~optional constant_expression) "]")
-             #:with name #'(error "Parsing direct-declarator: Unhandled array declaration")
-             #:with sigvars #'(error "Parsing direct-declarator: Unhandled array declaration")]
+    [pattern ((~literal direct_declarator) decl:direct-declarator "[" (~optional constant_expression) "]")
+             #:with name #'decl.name
+             #:with sigvars #'()]
     [pattern ((~literal direct_declarator) decl:direct-declarator "(" params:parameter-type-list ")")
              #:with name #'decl.name
              #:with sigvars #'params.sigvars]
@@ -132,7 +132,11 @@
     [pattern ((~literal initializer) (~or* expr:assignment-expression expr:initializer-list))
              #:with expression #'expr.expression]
     )
-  (define-syntax-class initializer-list)
+  (define-syntax-class initializer-list
+    #:attributes (expression)
+    [pattern ((~literal initializer_list) exp:initializer ...)
+             #:with expression #'(c-expression-array (list exp.expression ...))]
+    )
   (define-syntax-class statement
     #:attributes (statement statements)
     [pattern ((~literal statement) (~or* stmt:labeled-statement

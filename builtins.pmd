@@ -2,6 +2,7 @@
 
 (require psl "arith.pmd")
 (require psl "syntax.pmd")
+(require ceagle "builtins.c")
 
 (defmacro (__builtin_set_test_result n)
   (match n
@@ -110,3 +111,17 @@
 
 (defmacro (%c-case e . xs)
   `(%#-case ,e ,@xs))
+
+; GCC compatability
+
+(define (__builtin_trap) (%-throw))
+(define (__builtin_bswap64 x) (psnip_builtin_bswap64 x))
+  ;; `(syntax-fold %#-or
+  ;;               (%#-bitshiftr (%#-and x 0xFF00000000000000 (%-unbox 56)))
+  ;;               (%#-bitshiftr (%#-and x 0x00FF000000000000 (%-unbox 40)))
+  ;;               (%#-bitshiftr (%#-and x 0x0000FF0000000000 (%-unbox 24)))
+  ;;               (%#-bitshiftr (%#-and x 0x000000FF00000000 (%-unbox 8)))
+  ;;               (%#-bitshiftl (%#-and x 0x00000000FF000000 (%-unbox 8)))
+  ;;               (%#-bitshiftl (%#-and x 0x0000000000FF0000 (%-unbox 24)))
+  ;;               (%#-bitshiftl (%#-and x 0x000000000000FF00 (%-unbox 40)))
+  ;;               (%#-bitshiftl (%#-and x 0x00000000000000FF (%-unbox 56)))))

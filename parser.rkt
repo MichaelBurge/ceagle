@@ -225,8 +225,7 @@ initializer
 : assignment_expression
 | /"{" initializer_list /[","] /"}"
 
-initializer_list
-: [ initializer_list "," ] initializer
+initializer_list: [ initializer /","]* initializer
 
 statement
 : labeled_statement

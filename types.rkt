@@ -82,6 +82,7 @@
 (struct c-sizeof   c-expression ([ value : (U c-type c-expression)]) #:transparent)
 (struct c-array-access c-expression ([ array : c-expression ] [ index : c-expression ]) #:transparent)
 (struct c-expression-sequence c-expression ([ exps : c-expressions ]) #:transparent)
+(struct c-expression-array c-expression ([ exps : c-expressions ]) #:transparent)
 
 (struct c-field-info ([ offset : Integer ] [ type : c-type ]) #:transparent)
 
