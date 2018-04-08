@@ -708,12 +708,14 @@ Switch Statements
 (define (compile-do-while x)
   (destruct c-do-while x)
   (with-breakpoint
-    (with-continuepoint
-      (quasiquote-pyramid
-       `(begin ,(compile-statement x-body)
-               (if ,(compile-expression x-pred 'rvalue)
-                   (continue 0)
-                   (break #f)))))))
+    (quasiquote-pyramid
+     `(%c-loop-forever
+       ,(with-continuepoint
+          (quasiquote-pyramid
+           `(begin ,(compile-statement x-body)
+                   (if ,(compile-expression x-pred 'rvalue)
+                       (continue 0)
+                       (break #f)))))))))
 
 (: compile-goto        (-> c-goto        Pyramid))
 (define (compile-goto x)
@@ -814,13 +816,14 @@ Switch Statements
 
 (: register-builtins! (-> Void))
 (define (register-builtins!)
-  (register-variable! '__builtin_set_test_result (c-signature (c-type-void) (list (c-sigvar 'expected t-int))))
-  (register-variable! '__builtin_ctzll           (c-signature t-int (list (c-sigvar 'x t-int))))
-  (register-variable! '__builtin_clzll           (c-signature t-int (list (c-sigvar 'x t-int))))
-  (register-variable! '__builtin_bswap64         (c-signature t-int (list (c-sigvar 'x t-int))))
-  (register-variable! '__builtin_trap            (c-signature (c-type-void) (list (c-sigvar 'x t-int))))
+  (register-variable! '__builtin_set_test_result    (c-signature (c-type-void) (list (c-sigvar 'expected t-int))))
+  (register-variable! '__builtin_ctzll              (c-signature t-int (list (c-sigvar 'x t-int))))
+  (register-variable! '__builtin_clzll              (c-signature t-int (list (c-sigvar 'x t-int))))
+  (register-variable! '__builtin_bswap64            (c-signature t-int (list (c-sigvar 'x t-int))))
+  (register-variable! '__builtin_trap               (c-signature (c-type-void) (list (c-sigvar 'x t-int))))
 
-  (register-variable! '__builtin_print_word      (c-signature t-int (list (c-sigvar 'x t-int))))
+  (register-variable! '__builtin_print_word         (c-signature t-int (list (c-sigvar 'x t-int))))
+  (register-variable! '__builtin_set_max_iterations (c-signature t-int (list (c-sigvar 'x t-int))))
   )
 
 (: type-signed? (-> c-type Boolean))

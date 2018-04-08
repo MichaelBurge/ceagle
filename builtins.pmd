@@ -130,3 +130,6 @@
 ; Debug utilities
 
 (define (__builtin_print_word x) (%#-ioctl-print-word x))
+(defmacro (__builtin_set_max_iterations x)
+  (define n (%#-get-const-integer x))
+  `(%-set-max-iterations! ,n))
