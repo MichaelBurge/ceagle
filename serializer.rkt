@@ -74,7 +74,7 @@
 (: expand-expression (-> CQ c-expression))
 (define (expand-expression x)
   (match x
-    [`(const ,v) (c-const v)]
+    [`(const ,v ,signed?) (c-const v signed?)]
     [`(var ,name) (c-variable name)]
     [`(ternary ,p ,x1 ,x2) (c-ternary (expand-expression p) (expand-expression x1) (expand-expression x2))]
     [`(binop ,op ,x1 ,x2) (c-binop op (expand-expression x1) (expand-expression x2))]
@@ -91,7 +91,7 @@
 (: shrink-expression (-> c-expression CQ))
 (define (shrink-expression x)
   (match x
-    [(struct c-const (v)) `(const ,v)]
+    [(struct c-const (v signed?)) `(const ,v ,signed?)]
     [(struct c-variable (name)) `(var ,name)]
     [(struct c-ternary (p x1 x2)) `(ternary ,(shrink-expression p) ,(shrink-expression x1) ,(shrink-expression x2))]
     [(struct c-binop (op x1 x2)) `(binop ,op ,(shrink-expression x1) ,(shrink-expression x2))]

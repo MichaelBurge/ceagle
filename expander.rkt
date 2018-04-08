@@ -4,7 +4,8 @@
 (require (for-syntax syntax/parse))
 (require (for-syntax syntax/parse/debug))
 
-(provide expand-translation-unit)
+(provide expand-translation-unit
+         specifier-set-type)
 
 (begin-for-syntax
   (define-syntax-class translation-unit
@@ -165,7 +166,7 @@
   (define-syntax-class expression-statement
     #:attributes (statement expression)
     [pattern ((~literal expression_statement) (~optional expr:expression))
-             #:with expression (if (attribute expr) #'expr.expression #'(c-const 0))
+             #:with expression (if (attribute expr) #'expr.expression #'(c-const 0 #t))
              #:with statement (if (attribute expr) #'(c-expression-statement expression) #'(c-block '()))]
     )
   (define-syntax-class selection-statement
@@ -344,8 +345,9 @@
   (define-syntax-class primary-expression
     #:attributes (expression)
     [pattern ((~literal primary_expression) name:identifier) #:with expression #'(c-variable (quote name))]
-    [pattern ((~literal primary_expression) value:integer)   #:with expression #'(c-const (quote value))]
-    [pattern ((~literal primary_expression) value:string)    #:with expression #'(c-const (quote value))]
+    [pattern ((~literal primary_expression) value:uinteger)  #:with expression #'(c-const (quote value.value) #f)]
+    [pattern ((~literal primary_expression) value:sinteger)  #:with expression #'(c-const (quote value.value) #t)]
+    [pattern ((~literal primary_expression) value:string)    #:with expression #'(c-const (quote value) #f)]
     [pattern ((~literal primary_expression) "(" expr:expression ")") #:with expression #'expr.expression]
     )
   (define-syntax-class constant-expression
@@ -460,6 +462,13 @@
              #:with statements #''()]
     )
 
+  (define-syntax-class uinteger
+    [pattern ((~literal uinteger) value:integer)]
+    )
+  (define-syntax-class sinteger
+    [pattern ((~literal sinteger) value:integer)]
+    )
+
   (define-syntax-class assignment-operator
     #:attributes (operator)
     [pattern ((~literal assignment_operator) "=") #:with operator '=]
@@ -499,11 +508,10 @@
       ['void (c-type-void)]
       ['unsigned
        (match ty
-         [(struct c-type-fixed _) (begin (set-c-type-fixed-signed?! ty #f)
-                                         ty)]
+         [(struct c-type-fixed (signed? size)) (c-type-fixed #f size)]
          [_ (error "specifier-set-type: Unhandle unsigned type")])]
-      ['char (begin (set-c-type-fixed-bytes! ty 1)
-                    ty)]
+      ['char (match ty [(struct c-type-fixed (signed? size))
+                        (c-type-fixed signed? size)])]
       [(struct c-type-alias _) x]
       [(struct c-type-struct _) x]
       [(struct c-type-union _) x]

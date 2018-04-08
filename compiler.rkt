@@ -176,8 +176,7 @@ Switch Statements
   (define (expression-type exp)
     (define macro-type (c-signature t-uint '()))
     (match exp
-      [(struct c-const ((? exact-positive-integer?))) t-uint]
-      [(struct c-const ((? exact-integer?)))          t-int]
+      [(struct c-const (_ signed?)) (if signed? t-int t-uint)]
       [(struct c-variable (name)) (hash-ref (*variables*) name (λ () (error "expression-type: Unknown variable" name (*variables*))))]
       [(struct c-ternary (_ cons _)) (expression-type cons)]
       [(struct c-binop (_ left _)) (expression-type left)]
@@ -197,6 +196,13 @@ Switch Statements
        (define fi (hash-ref ft name (λ () (error "expression-type: No field with name found" source name ft))))
        (c-field-info-type fi)
        ]
+      [(struct c-cast (ty _)) ty]
+      [(struct c-sizeof (x)) t-size]
+      [(struct c-array-access (arr idx)) (match (expression-type arr)
+                                           [(struct c-type-pointer (ty)) ty]
+                                           [ty (error "expression-type: An array should be a pointer" ty)])]
+      [(struct c-expression-sequence (exps)) (expression-type (last exps))]
+      [(struct c-expression-array (exps)) (expression-type (first exps))]
       [_ (error "expression-type: Unhandled case" exp)]
       ))
 
@@ -263,8 +269,8 @@ Switch Statements
   (destruct c-decl-var x)
   (register-variable! x-name x-type)
   (quasiquote-pyramid
-   `(,(pyr-const (variable-definer x-type))
-     ,(pyr-const x-name)
+   `(,(pyr-variable (variable-definer x-type))
+     ,(pyr-const x-name #t)
      ,(if x-init
           (compile-expression x-init 'rvalue)
           (compile-default-initializer x-type))
@@ -285,8 +291,8 @@ Switch Statements
   (match ty
     [(struct c-type-fixed _) (expand-pyramid `(%-unbox 0))]
     [(struct c-type-alias _) (compile-default-initializer (resolve-type ty))]
-    [(struct c-type-struct _) (quasiquote-pyramid `(%c-allocate-struct ,(pyr-const (type-size ty))))]
-    [(struct c-type-union _) (quasiquote-pyramid `(%c-allocate-struct ,(pyr-const (type-size ty))))]
+    [(struct c-type-struct _) (expand-pyramid `(%c-allocate-struct ,(type-size ty)))]
+    [(struct c-type-union _) (expand-pyramid `(%c-allocate-struct ,(type-size ty)))]
     ))
 
 (: compile-decl-type (-> c-decl-type Pyramid))
@@ -381,14 +387,14 @@ Switch Statements
 (define (compile-const x val-ty)
   (match val-ty
     ['lvalue (error "compile-const: A constant cannot be an lvalue" x)]
-    ['rvalue (quasiquote-pyramid `(%-unbox ,(pyr-const (c-const-value x))))]
+    ['rvalue (expand-pyramid `(%-unbox ,(c-const-value x)))]
     ))
 
 (: compile-variable (-> c-variable c-value-type Pyramid))
 (define (compile-variable x val-ty)
   (define exp (pyr-variable (c-variable-name x)))
   (define exp-ty (resolve-type (expression-type x)))
-  (define size (pyr-const (type-size exp-ty)))
+  (define size (expand-pyramid (type-size exp-ty)))
   (match* (val-ty exp-ty)
     [('rvalue (struct c-signature _))  exp]
     [('rvalue (struct c-type-fixed _)) (quasiquote-pyramid `(%c-word-read ,exp))]
@@ -418,22 +424,23 @@ Switch Statements
 (: compile-binop (-> c-binop c-value-type Pyramid))
 (define (compile-binop x val-ty)
   (destruct c-binop x)
-  (define rvalue-exp (pyr-application (op->builtin x-op)
+  (define signed? (expression-signed? x))
+  (define rvalue-exp (pyr-application (op->builtin x-op signed?)
                                       (list (compile-expression x-left 'rvalue)
                                             (compile-expression x-right 'rvalue))))
   (define vop (assign-op->value-op x-op))
   (match x-op
     ['+ (compile-binop (c-binop 'raw+
                                 (c-binop '* x-left
-                                         (c-const (type-increment-size (expression-type x-left))))
+                                         (c-const (type-increment-size (expression-type x-left)) #t))
                                 (c-binop '* x-right
-                                         (c-const (type-increment-size (expression-type x-right)))))
+                                         (c-const (type-increment-size (expression-type x-right)) #t)))
                        'rvalue)]
     ['- (compile-binop (c-binop 'raw-
                                 (c-binop '* x-left
-                                         (c-const (type-increment-size (expression-type x-left))))
+                                         (c-const (type-increment-size (expression-type x-left)) #t))
                                 (c-binop '* x-right
-                                         (c-const (type-increment-size (expression-type x-right)))))
+                                         (c-const (type-increment-size (expression-type x-right)) #t)))
                        'rvalue)]
     [ _ (if vop ; vop is only true if x-op was an assignment
             (quasiquote-pyramid
@@ -455,7 +462,7 @@ Switch Statements
 (: compile-unop (-> c-unop c-value-type Pyramid))
 (define (compile-unop x val-ty)
   (destruct c-unop x)
-  (define rvalue-exp (pyr-application (op->builtin x-op)
+  (define rvalue-exp (pyr-application (op->builtin x-op #f)
                                       (list (compile-expression x-exp 'rvalue))))
   (define (wants-old?)
     (match x-op
@@ -467,21 +474,21 @@ Switch Statements
   (match x-op
     ['& (compile-expression x-exp 'lvalue)]
     ['* (compile-dereference x-exp val-ty)]
-    ['- (compile-expression (c-binop '- (c-const 0) x-exp) val-ty)]
+    ['- (compile-expression (c-binop '- (c-const 0 #t) x-exp) val-ty)]
     ['+ (compile-expression x-exp val-ty)]
-    ['pre++ (compile-expression (c-binop '+= x-exp (c-const 1)) val-ty)]
-    ['pre-- (compile-expression (c-binop '-= x-exp (c-const 1)) val-ty)]
+    ['pre++ (compile-expression (c-binop '+= x-exp (c-const 1 #t)) val-ty)]
+    ['pre-- (compile-expression (c-binop '-= x-exp (c-const 1 #t)) val-ty)]
     ['post++
      (assert (equal? val-ty 'rvalue))
      (quasiquote-pyramid
               `(let* ([ old   ,(compile-expression x-exp 'rvalue) ])
-                 ,(compile-expression (c-binop '+= x-exp (c-const 1)) 'rvalue)
+                 ,(compile-expression (c-binop '+= x-exp (c-const 1 #t)) 'rvalue)
                  old))]
     ['post--
      (assert (equal? val-ty 'rvalue))
      (quasiquote-pyramid
               `(let* ([ old   ,(compile-expression x-exp 'rvalue) ])
-                 ,(compile-expression (c-binop '-= x-exp (c-const 1)) 'rvalue)
+                 ,(compile-expression (c-binop '-= x-exp (c-const 1 #t)) 'rvalue)
                  old))]
     [_ rvalue-exp]
     ))
@@ -514,8 +521,8 @@ Switch Statements
   (define ptr-exp
     (quasiquote-pyramid
      `(%c-struct-field ,(compile-expression x-source 'lvalue)
-                       (%-unbox ,(pyr-const info-offset))
-                       (%-unbox ,(pyr-const (type-size info-type))))))
+                       ,(pyr-const info-offset #f)
+                       ,(pyr-const (type-size info-type) #f))))
 
   (match val-ty
     ['lvalue ptr-exp]
@@ -550,7 +557,7 @@ Switch Statements
   (destruct c-expression-array x)
   (assert (equal? val-ty 'rvalue))
   (quasiquote-pyramid
-   `(%#-mem-alloc-init (%#-* (%-unbox WORD) (%-unbox ,(pyr-const (length x-exps))))
+   `(%#-mem-alloc-init (%#-* (%-unbox WORD) (%-unbox ,(pyr-const (length x-exps) #t)))
                        ,@(map (λ ([ exp : c-expression ])
                                 (compile-expression exp 'rvalue))
                               x-exps)))
@@ -612,7 +619,7 @@ Switch Statements
 (define (switch-case-label c)
   (destruct c-labeled-case c)
   (match c-expected
-    [(struct c-const (cv))
+    [(struct c-const (cv _))
      (label (symbol-append 'switch-case-
                            (cvalue->symbol (*switch-base*))
                            (cvalue->symbol cv)))]
@@ -675,10 +682,10 @@ Switch Statements
   (define init (map compile-declaration x-init))
   (define post (if x-post
                    (compile-expression x-post 'rvalue)
-                   (pyr-begin (list))))
+                   (expand-pyramid `(begin))))
   (define pred (if x-pred
                    (compile-expression x-pred 'rvalue)
-                   (pyr-const 1)))
+                   (expand-pyramid #t)))
 
   (with-breakpoint
     (quasiquote-pyramid
@@ -784,11 +791,15 @@ Switch Statements
     [_    #f]
     ))
 
-(: op->builtin (-> Symbol Pyramid))
-(define (op->builtin op)
+(: op->builtin (-> Symbol Boolean Pyramid))
+(define (op->builtin op signed?)
   (define rvalue-op
     (match op
       [(? assign-op->value-op x) x]
+      ['<  (if signed? 's<  'u<)]
+      ['>  (if signed? 's>  'u>)]
+      ['<= (if signed? 's<= 'u<=)]
+      ['>= (if signed? 's>= 'u>=)]
       [_ op]))
   (pyr-variable (symbol-append '%c-word-op rvalue-op))
   )
@@ -808,4 +819,19 @@ Switch Statements
   (register-variable! '__builtin_clzll           (c-signature t-int (list (c-sigvar 'x t-int))))
   (register-variable! '__builtin_bswap64         (c-signature t-int (list (c-sigvar 'x t-int))))
   (register-variable! '__builtin_trap            (c-signature (c-type-void) (list (c-sigvar 'x t-int))))
+
+  (register-variable! '__builtin_print_word      (c-signature t-int (list (c-sigvar 'x t-int))))
+  )
+
+(: type-signed? (-> c-type Boolean))
+(define (type-signed? x)
+  (match (resolve-type x)
+    [(struct c-type-fixed (signed? _)) signed?]
+    [(struct c-type-pointer _) #f]
+    [_ (error "type-signed?: Unable to determine signedness of type" x)]
+    ))
+
+(: expression-signed? (-> c-expression Boolean))
+(define (expression-signed? x)
+  (type-signed? (expression-type x))
   )

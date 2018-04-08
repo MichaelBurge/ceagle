@@ -14,7 +14,7 @@
 (struct c-declaration () #:transparent)
 (struct c-expression () #:transparent)
 
-(struct c-type-fixed ([ signed? : Boolean ] [ bytes : Size ]) #:mutable #:transparent)
+(struct c-type-fixed ([ signed? : Boolean ] [ bytes : Size ]) #:transparent)
 (struct c-type-struct-field ([ name : (U #f Symbol) ] [ type : c-type ]) #:mutable #:transparent)
 (struct c-type-struct ([ name : (Maybe Symbol) ] [ fs : c-type-struct-fields ]) #:transparent)
 (struct c-type-union ([ name : (Maybe Symbol) ] [ fs : c-type-struct-fields ]) #:transparent)
@@ -27,6 +27,9 @@
 (define t-int (c-type-fixed #t 32))
 (: t-uint c-type)
 (define t-uint (c-type-fixed #f 32))
+
+(: t-size c-type)
+(define t-size t-uint)
 
 (define-type c-type-struct-fields (Listof c-type-struct-field))
 (define-type c-type (U c-type-fixed c-type-struct c-type-alias c-signature c-type-pointer c-type-void c-type-union))
@@ -71,7 +74,7 @@
                             c-continue
                             c-declaration))
 
-(struct c-const    c-expression ([ value : CValue ]) #:transparent)
+(struct c-const    c-expression ([ value : CValue ] [ signed? : Boolean ]) #:transparent)
 (struct c-variable c-expression ([ name : Symbol ]) #:transparent)
 (struct c-ternary  c-expression ([ pred : c-expression ] [ consequent : c-expression ] [ alternative : c-expression ]) #:transparent)
 (struct c-binop    c-expression ([ op : Symbol ] [ left : c-expression ] [ right : c-expression ]) #:transparent)

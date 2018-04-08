@@ -6,9 +6,13 @@ translation_unit: ( external_declaration | /";") *
 
 primary_expression
 : IDENTIFIER
-| INTEGER
+| uinteger
+| sinteger
 | STRING_LITERAL
 | "(" expression ")"
+
+uinteger: UINTEGER
+sinteger: SINTEGER
 
 postfix_expression
 : primary_expression

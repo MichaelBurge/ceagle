@@ -65,11 +65,11 @@
    [(from/to "//" "\n") (token 'SCOMMENT   lexeme #:skip? #t)]
    [(from/to "/*" "*/") (token 'MCOMMENT   lexeme #:skip? #t)]
    ; Constants
-   [(:: "0x" (:+ hex) "ULL")    (token 'INTEGER (string->number (between 2 3) 16))]
-   [(:: "0x" (:+ hex))          (token 'INTEGER (string->number (substring lexeme 2) 16))]
-   [(:: (:+ numeric)  "ULL")    (token 'INTEGER (string->number (between 0 3)))]
-   [(:+ numeric)                (token 'INTEGER (string->number lexeme))]
-   [(:: "'" (char-complement "'") "'") (token 'INTEGER (char->integer (string-ref lexeme 1)))]
+   [(:: "0x" (:+ hex) "ULL")    (token 'UINTEGER (string->number (between 2 3) 16))]
+   [(:: "0x" (:+ hex))          (token 'SINTEGER (string->number (substring lexeme 2) 16))]
+   [(:: (:+ numeric)  "ULL")    (token 'UINTEGER (string->number (between 0 3)))]
+   [(:+ numeric)                (token 'SINTEGER (string->number lexeme))]
+   [(:: "'" (char-complement "'") "'") (token 'UINTEGER (char->integer (string-ref lexeme 1)))]
    ["'\\''"                  (token 'ONECHAR (char->integer #\'))]
    [(:: "\""                 (:* (char-complement "\"")) "\"") (token 'STRING_LITERAL lexeme)]
    ; Punctuation

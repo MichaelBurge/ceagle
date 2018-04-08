@@ -106,6 +106,6 @@
   (expression-transform
    (λ ([ exp : c-expression ])
      (match exp
-       [(struct c-unop ('- (struct c-const ((? integer? v)))))
-        (c-const (- 0 v))]
+       [(struct c-unop ('- (struct c-const ((? integer? v) _))))
+        (c-const (- 0 v) #t)]
        [_ exp]))))

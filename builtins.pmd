@@ -45,11 +45,19 @@
 
 (defmacro (%c-word-op== x y) `(%#-bool->word (%#-=  ,x ,y)))
 (defmacro (%c-word-op!= x y) `(%#-bool->word (%#-not (%#-= ,x ,y))))
-(defmacro (%c-word-op>= x y) `(%#-bool->word (%#->= ,x ,y)))
-(defmacro (%c-word-op> x y)  `(%#-bool->word (%#->  ,x ,y)))
-(defmacro (%c-word-op<= x y) `(%#-bool->word (%#-<= ,x ,y)))
-(defmacro (%c-word-op< x y)  `(%#-bool->word (%#-<  ,x ,y)))
-(defmacro (%c-word-op> x y)  `(%#-bool->word (%#->  ,x ,y)))
+
+(defmacro (%c-word-opu>= x y) `(%#-bool->word (%#-u>= ,x ,y)))
+(defmacro (%c-word-opu> x y)  `(%#-bool->word (%#-u>  ,x ,y)))
+(defmacro (%c-word-opu<= x y) `(%#-bool->word (%#-u<= ,x ,y)))
+(defmacro (%c-word-opu< x y)  `(%#-bool->word (%#-u<  ,x ,y)))
+(defmacro (%c-word-opu> x y)  `(%#-bool->word (%#-u>  ,x ,y)))
+
+(defmacro (%c-word-ops>= x y) `(%#-bool->word (%#-s>= ,x ,y)))
+(defmacro (%c-word-ops> x y)  `(%#-bool->word (%#-s>  ,x ,y)))
+(defmacro (%c-word-ops<= x y) `(%#-bool->word (%#-s<= ,x ,y)))
+(defmacro (%c-word-ops< x y)  `(%#-bool->word (%#-s<  ,x ,y)))
+(defmacro (%c-word-ops> x y)  `(%#-bool->word (%#-s>  ,x ,y)))
+
 (defmacro (%c-word-opraw+ x y) `(%#-+  ,x ,y))
 (defmacro (%c-word-opraw- x y) `(%#--  ,x ,y))
 (defmacro (%c-word-op* x y)  `(%#-*  ,x ,y))
@@ -116,12 +124,9 @@
 
 (define (__builtin_trap) (%-throw))
 (define (__builtin_bswap64 x) (psnip_builtin_bswap64 x))
-  ;; `(syntax-fold %#-or
-  ;;               (%#-bitshiftr (%#-and x 0xFF00000000000000 (%-unbox 56)))
-  ;;               (%#-bitshiftr (%#-and x 0x00FF000000000000 (%-unbox 40)))
-  ;;               (%#-bitshiftr (%#-and x 0x0000FF0000000000 (%-unbox 24)))
-  ;;               (%#-bitshiftr (%#-and x 0x000000FF00000000 (%-unbox 8)))
-  ;;               (%#-bitshiftl (%#-and x 0x00000000FF000000 (%-unbox 8)))
-  ;;               (%#-bitshiftl (%#-and x 0x0000000000FF0000 (%-unbox 24)))
-  ;;               (%#-bitshiftl (%#-and x 0x000000000000FF00 (%-unbox 40)))
-  ;;               (%#-bitshiftl (%#-and x 0x00000000000000FF (%-unbox 56)))))
+(define (__builtin_ctzll x) (psnip_builtin_ctz64 x))
+(define (__builtin_clzll x) (psnip_builtin_clz64 x))
+
+; Debug utilities
+
+(define (__builtin_print_word x) (%#-ioctl-print-word x))

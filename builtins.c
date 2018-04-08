@@ -27,3 +27,10 @@ int psnip_builtin_ctz64(psnip_uint64_t v) {
   return
     MultiplyDeBruijnBitPosition[((psnip_uint64_t)((v & -v) * 0x03f79d71b4ca8b09ULL)) >> 58];
 }
+
+int psnip_builtin_clz64( psnip_uint64_t x )
+{
+  if (x == 0) return 64;
+  for (int n = 0; ((x & 0x8000000000000000) == 0); n++, x <<= 1);
+  return n;
+}
