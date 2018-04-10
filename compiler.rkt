@@ -212,11 +212,10 @@ Switch Statements
 
   (: type-size (-> c-type Size))
   (define (type-size x)
-    (match x
+    (match (resolve-type x)
       [(struct c-type-fixed (_ bytes)) bytes]
       [(struct c-type-struct (_ fields)) (for/sum : Size ([ field fields ])
                                            (type-size (c-type-struct-field-type field)))]
-      [(struct c-type-alias _) (type-size (resolve-type x))]
       [(struct c-signature _) 32]
       [(struct c-type-pointer _) 32]
       [(struct c-type-union (_ fields)) (fields-max-size fields)]
@@ -278,19 +277,17 @@ Switch Statements
 
 (: variable-definer (-> c-type Symbol))
 (define (variable-definer ty)
-  (match ty
+  (match (resolve-type ty)
     [(struct c-type-fixed _) '%c-define-fixnum]
     [(struct c-type-struct _) '%c-define-struct]
-    [(struct c-type-alias _) (variable-definer (resolve-type ty))]
     [(struct c-type-pointer _) '%c-define-pointer]
     [(struct c-type-union _) '%c-define-union]
-    [_ (error "variable_definer: Unhandled case" ty)]))
+    [ty (error "variable_definer: Unhandled case" ty)]))
 
 (: compile-default-initializer (-> c-type Pyramid))
 (define (compile-default-initializer ty)
-  (match ty
+  (match (resolve-type ty)
     [(struct c-type-fixed _) (expand-pyramid `(%-unbox 0))]
-    [(struct c-type-alias _) (compile-default-initializer (resolve-type ty))]
     [(struct c-type-struct _) (expand-pyramid `(%c-allocate-struct ,(type-size ty)))]
     [(struct c-type-union _) (expand-pyramid `(%c-allocate-struct ,(type-size ty)))]
     ))
@@ -441,7 +438,7 @@ Switch Statements
                        'rvalue)]
     [(and '= (? struct?)) (quasiquote-pyramid
                            `(%#-memcpy ,(compile-expression x-left 'lvalue)
-                                       ,(compile-expression x-right 'lvalue)
+                                       ,(compile-expression x-right 'rvalue)
                                        ,(expand-pyramid `(%-unbox ,(type-size (expression-type x-left))))))]
     [ _
       (let* ([ signed? (expression-signed? x) ]
