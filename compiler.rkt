@@ -424,11 +424,8 @@ Switch Statements
 (: compile-binop (-> c-binop c-value-type Pyramid))
 (define (compile-binop x val-ty)
   (destruct c-binop x)
-  (define signed? (expression-signed? x))
-  (define rvalue-exp (pyr-application (op->builtin x-op signed?)
-                                      (list (compile-expression x-left 'rvalue)
-                                            (compile-expression x-right 'rvalue))))
   (define vop (assign-op->value-op x-op))
+  (define (struct? _) (c-type-struct? (resolve-type (expression-type x-left))))
   (match x-op
     ['+ (compile-binop (c-binop 'raw+
                                 (c-binop '* x-left
@@ -442,13 +439,22 @@ Switch Statements
                                 (c-binop '* x-right
                                          (c-const (type-increment-size (expression-type x-right)) #t)))
                        'rvalue)]
-    [ _ (if vop ; vop is only true if x-op was an assignment
+    [(and '= (? struct?)) (quasiquote-pyramid
+                           `(%#-memcpy ,(compile-expression x-left 'lvalue)
+                                       ,(compile-expression x-right 'lvalue)
+                                       ,(expand-pyramid `(%-unbox ,(type-size (expression-type x-left))))))]
+    [ _
+      (let* ([ signed? (expression-signed? x) ]
+             [ rvalue-exp (pyr-application (op->builtin x-op signed?)
+                                           (list (compile-expression x-left 'rvalue)
+                                                 (compile-expression x-right 'rvalue)))])
+        (if vop ; vop is only true if x-op was an assignment
             (quasiquote-pyramid
              `(let ([ value ,(compile-binop (c-binop vop x-left x-right) 'rvalue)])
                 (begin (%c-word-write! ,(compile-expression x-left 'lvalue)
                                        value)
                        value)))
-            rvalue-exp)]
+            rvalue-exp))]
     ))
 
 ; x+1 on a T pointer increases the word in x by sizeof(T).
@@ -831,7 +837,7 @@ Switch Statements
   (match (resolve-type x)
     [(struct c-type-fixed (signed? _)) signed?]
     [(struct c-type-pointer _) #f]
-    [_ (error "type-signed?: Unable to determine signedness of type" x)]
+    [y (error "type-signed?: Unable to determine signedness of type" y)]
     ))
 
 (: expression-signed? (-> c-expression Boolean))
