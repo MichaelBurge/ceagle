@@ -1,13 +1,12 @@
-#lang pyramid
+#lang pyramid/core
 
-(require psl "arith.pmd")
+(require psl "primitives.pmd")
 (require psl "syntax.pmd")
 (require ceagle "builtins.c")
 
-(defmacro (__builtin_set_test_result n)
-  (match n
-    [`(%-unbox ,x) `(set-test-result! ,x)]
-    [_ (error "__builtin_set_test_result: Unknown case" n)]
+(define-syntax (__builtin_set_test_result stx)
+  (syntax-case stx ()
+    [(_ n) #'(set-test-result! n)]
     ))
 
 (defmacro (%c-define-word-assign-unop assign-op base-op)
@@ -31,8 +30,8 @@
 (%c-define-word-assign-binop %c-word-op/= '%c-word-op/)
 (%c-define-word-assign-binop %c-word-op=  '%c-word-opright)
 
-(defmacro (%c-word-op-1 x)  `(%#-- ,x (%-unbox 1)))
-(defmacro (%c-word-op+1 x)  `(%#-+ ,x (%-unbox 1)))
+(defmacro (%c-word-op-1 x)  `(%#-- ,x 1))
+(defmacro (%c-word-op+1 x)  `(%#-+ ,x 1))
 (defmacro (%c-word-opdereference x) `(%c-word-read ,x))
 (defmacro (%c-word-op! x)   `(%#-not ,x))
 (defmacro (%c-word-op~ x)   `(%#-negate ,x))
@@ -74,36 +73,45 @@
       (loop))))
 
 (defmacro (%c-allocate-fixnum)
-  `(%#-mem-alloc (%-unbox WORD)))
+  `(%#-mem-alloc %#-WORD))
 
 (defmacro (%c-allocate-struct size)
-  `(%#-mem-alloc (%-unbox ,size)))
+  `(%#-mem-alloc (unbox ,size)))
 
 (defmacro (%c-struct-field ptr os size)
   `(%#-+ ,ptr ,os))
 
 (defmacro (%c-word-read ptr)
-  `(%#-mem-read ,ptr (%-unbox 0)))
+  `(%#-mem-read ,ptr (unbox 0)))
 
-(defmacro (%c-word-write! ptr val)
-  `(%#-mem-write! ,ptr (%-unbox 0) ,val))
+(define-syntax (%c-word-write! stx)
+  (syntax-case stx ()
+    [(_ ptr val) #'(%#-mem-write! ptr (unbox 0) val)]
+    ))
+
 (defmacro (%c-word-opright x y) y)
 
 (defmacro (%c-noinline var) `(set! ,var ,var))
 
-(defmacro (%c-define-arg name init)
-  `(begin (define ,name (%c-allocate-fixnum))
-          (%c-noinline ,name)
-          (%c-word-write! ,name ,init)))
+(define-syntax (%c-define-arg stx)
+  (syntax-case stx ()
+    [(_ name init) #'(begin (define name (%c-allocate-fixnum))
+                            (%c-noinline name)
+                            (%c-word-write! name init))]
+    ))
 
-(defmacro (%c-struct-copy size from to)
-  `(%#-memcpy ,to ,from ,size))
+(define-syntax (%c-struct-copy stx)
+  (syntax-case stx ()
+    [(_ size from to) #'(%#-memcpy to from size)]
+    ))
 
-(defmacro (%c-define-fixnum name init)
-  `(begin (define ,name (let ([ ptr (%c-allocate-fixnum) ])
-                          (%c-word-write! ptr ,init)
-                          ptr))
-          (%c-noinline ,name)))
+(define-syntax (%c-define-fixnum stx)
+  (syntax-case stx ()
+    [(_ name init) #'(begin (define name (let ([ ptr (%c-allocate-fixnum) ])
+                                           (%c-word-write! ptr init)
+                                           ptr))
+                            (%c-noinline name))]
+    ))
 
 (defmacro (%c-define-struct name init)
   `(begin (define ,name ,init)
@@ -122,7 +130,10 @@
 
 ; GCC compatability
 
-(define (__builtin_trap) (%-throw))
+(defmacro (__builtin_trap)
+  `(begin ;(%#-ioctl-print-symbol (%-unbox (%-lexical-value '%c-function-name)))
+          (%-throw))
+  )
 (define (__builtin_bswap64 x) (psnip_builtin_bswap64 x))
 (define (__builtin_ctzll x) (psnip_builtin_ctz64 x))
 (define (__builtin_clzll x) (psnip_builtin_clz64 x))
@@ -130,6 +141,7 @@
 ; Debug utilities
 
 (define (__builtin_print_word x) (%#-ioctl-print-word x))
-(defmacro (__builtin_set_max_iterations x)
-  (define n (%#-get-const-integer x))
-  `(%-set-max-iterations! ,n))
+(define-syntax (__builtin_set_max_iterations stx)
+  (syntax-case stx ()
+    [(_ n) #'(%#-set-max-iterations! n)]
+    ))

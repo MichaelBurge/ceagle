@@ -374,7 +374,9 @@
     [pattern ((~literal type_qualifier) VOLATILE) #:with specifier #''volatile]
     )
 
-  (define-syntax-class direct_abstract_declarator)
+  (define-syntax-class direct_abstract_declarator
+    #:attributes (type-modifier)
+    )
 
   (define-syntax-class argument-expression-list
     #:attributes (expressions)

@@ -4,8 +4,8 @@
 (require "simplifier.rkt")
 (require (submod pyramid/types ast))
 (require pyramid/ast)
-(require pyramid/parser)
-(require (submod pyramid/parser macros))
+(require pyramid/expander)
+(require (submod pyramid/expander macros))
 (require pyramid/utils)
 (require pyramid/io)
 (require pyramid/globals)
@@ -237,6 +237,9 @@ Switch Statements
 (: *switch-base* (Parameterof Counter))
 (define *switch-base* (make-parameter 0))
 
+(: *current-function* (Parameterof Symbol))
+(define *current-function* (make-parameter 'TOPLEVEL))
+
 (: compile-translation-unit (-> c-unit Boolean Pyramid))
 (define (compile-translation-unit x execute?)
   (verbose-section "Ceagle AST" VERBOSITY-LOW
@@ -252,8 +255,8 @@ Switch Statements
      `(begin (require ceagle "builtins.pmd")
              ,decls
              ,(if execute?
-                  (quasiquote-pyramid `(%-box ,(compile-expression call-main 'rvalue)))
-                  (pyr-begin '()))))))
+                  (quasiquote-pyramid `(%#-box ,(compile-expression call-main 'rvalue)))
+                  (pyr-begin null))))))
 
 (: compile-declaration (-> c-declaration Pyramid))
 (define (compile-declaration x)
@@ -267,29 +270,27 @@ Switch Statements
 (define (compile-decl-var x)
   (destruct c-decl-var x)
   (register-variable! x-name x-type)
-  (quasiquote-pyramid
-   `(,(pyr-variable (variable-definer x-type))
-     ,(pyr-const x-name #t)
-     ,(if x-init
-          (compile-expression x-init 'rvalue)
-          (compile-default-initializer x-type))
-     )))
+  (make-macro-application #`(#,(variable-definer x-type) #,x-name #,(shrink-pyramid
+                                                                     (if x-init
+                                                                         (compile-expression x-init 'rvalue)
+                                                                         (compile-default-initializer x-type)))))
+  )
 
-(: variable-definer (-> c-type Symbol))
+(: variable-definer (-> c-type PyramidQ))
 (define (variable-definer ty)
   (match (resolve-type ty)
-    [(struct c-type-fixed _) '%c-define-fixnum]
-    [(struct c-type-struct _) '%c-define-struct]
-    [(struct c-type-pointer _) '%c-define-pointer]
-    [(struct c-type-union _) '%c-define-union]
+    [(struct c-type-fixed   _) #'%c-define-fixnum]
+    [(struct c-type-struct  _) #'%c-define-struct]
+    [(struct c-type-pointer _) #'%c-define-pointer]
+    [(struct c-type-union   _) #'%c-define-union]
     [ty (error "variable_definer: Unhandled case" ty)]))
 
 (: compile-default-initializer (-> c-type Pyramid))
 (define (compile-default-initializer ty)
   (match (resolve-type ty)
-    [(struct c-type-fixed _) (expand-pyramid `(%-unbox 0))]
-    [(struct c-type-struct _) (expand-pyramid `(%c-allocate-struct ,(type-size ty)))]
-    [(struct c-type-union _) (expand-pyramid `(%c-allocate-struct ,(type-size ty)))]
+    [(struct c-type-fixed  _) (expand-pyramid #'(unbox 0))]
+    [(struct c-type-struct _) (expand-pyramid #`(%c-allocate-struct #,(type-size ty)))]
+    [(struct c-type-union  _) (expand-pyramid #`(%c-allocate-struct #,(type-size ty)))]
     ))
 
 (: compile-decl-type (-> c-decl-type Pyramid))
@@ -310,13 +311,14 @@ Switch Statements
   (register-variable! x-name x-sig)
   (with-function-scope x-sig
     (λ ()
-      (expand-pyramid
-       `(define (,x-name ,@vars)
-          ,@(for/list : PyramidQs ([ arg x-sig-args ])
-              `(%c-define-arg ,(c-sigvar-name arg) ,(sigvar-init arg)))
-          ,(shrink-pyramid
-            (with-returnpoint
-              (compile-statement x-body))))))))
+      (pyr-definition x-name
+                      (pyr-lambda vars
+                                  (quasiquote-pyramid
+                                   `(begin ,@(for/list : Pyramids ([ arg x-sig-args ])
+                                               (expand-pyramid
+                                                (unsafe-cast #`(%c-define-arg #,(c-sigvar-name arg) #,(sigvar-init arg)))))
+                                           ,(with-returnpoint
+                                              (compile-statement x-body)))))))))
 
 (: compile-statement (-> c-statement Pyramid))
 (define (compile-statement x)
@@ -342,14 +344,14 @@ Switch Statements
 (define (compile-labeled x)
   (destruct c-labeled x)
   (expand-pyramid
-   `(begin (asm (label (quote ,x-name)))
-           ,(shrink-pyramid (compile-statement x-body)))))
+   #`(begin (asm (label (quote #,x-name)))
+            #,(shrink-pyramid (compile-statement x-body)))))
 
 (: compile-labeled-statement (-> label c-statement Pyramid))
 (define (compile-labeled-statement lbl stmt)
   (expand-pyramid
-   `(begin (asm (label (quote ,(label-name lbl))))
-           ,(shrink-pyramid (compile-statement stmt))))
+   #`(begin (asm (label (quote #,(label-name lbl))))
+           #,(shrink-pyramid (compile-statement stmt))))
   )
 
 (: compile-labeled-case (-> c-labeled-case Pyramid))
@@ -384,29 +386,29 @@ Switch Statements
 (define (compile-const x val-ty)
   (match val-ty
     ['lvalue (error "compile-const: A constant cannot be an lvalue" x)]
-    ['rvalue (expand-pyramid `(%-unbox ,(c-const-value x)))]
+    ['rvalue (expand-pyramid #`(unbox #,(c-const-value x)))]
     ))
 
 (: compile-variable (-> c-variable c-value-type Pyramid))
 (define (compile-variable x val-ty)
   (define exp (pyr-variable (c-variable-name x)))
   (define exp-ty (resolve-type (expression-type x)))
-  (define size (expand-pyramid (type-size exp-ty)))
+  (define size (expand-pyramid #`(unbox #,(type-size exp-ty))))
   (match* (val-ty exp-ty)
-    [('rvalue (struct c-signature _))  exp]
-    [('rvalue (struct c-type-fixed _)) (quasiquote-pyramid `(%c-word-read ,exp))]
+    [('rvalue (struct c-signature   _))  exp]
+    [('rvalue (struct c-type-fixed  _)) (quasiquote-pyramid `(%c-word-read ,exp))]
     [('rvalue (struct c-type-struct _))
      (quasiquote-pyramid
       `(let ([ copy (%c-allocate-struct ,size)])
-         (%c-struct-copy (%-unbox ,size) ,exp copy)))]
+         (%c-struct-copy ,size ,exp copy)))]
     [('rvalue (struct c-type-pointer _)) (quasiquote-pyramid `(%c-word-read ,exp))]
-    [('rvalue (struct c-type-union _))
+    [('rvalue (struct c-type-union   _))
      (quasiquote-pyramid
       `(let ([ copy (%c-allocate-struct ,size)])
-         (%c-struct-copy (%-unbox ,size) ,exp copy)))]
-    [('lvalue (struct c-type-fixed _)) exp]
+         (%c-struct-copy ,size ,exp copy)))]
+    [('lvalue (struct c-type-fixed  _)) exp]
     [('lvalue (struct c-type-struct _)) exp]
-    [('lvalue (struct c-type-union _)) exp]
+    [('lvalue (struct c-type-union  _)) exp]
     [('lvalue (struct c-type-pointer (ptr-ty))) exp]
     [(_ _)    (error "compile-variable: Unhandled case" val-ty exp-ty)]
     ))
@@ -439,12 +441,13 @@ Switch Statements
     [(and '= (? struct?)) (quasiquote-pyramid
                            `(%#-memcpy ,(compile-expression x-left 'lvalue)
                                        ,(compile-expression x-right 'rvalue)
-                                       ,(expand-pyramid `(%-unbox ,(type-size (expression-type x-left))))))]
+                                       ,(expand-pyramid #`(unbox #,(type-size (expression-type x-left))))))]
     [ _
       (let* ([ signed? (expression-signed? x) ]
-             [ rvalue-exp (pyr-application (op->builtin x-op signed?)
-                                           (list (compile-expression x-left 'rvalue)
-                                                 (compile-expression x-right 'rvalue)))])
+             [ rvalue-exp (quasiquote-pyramid
+                           `(,(op->builtin x-op signed?)
+                             ,(compile-expression x-left 'rvalue)
+                             ,(compile-expression x-right 'rvalue)))])
         (if vop ; vop is only true if x-op was an assignment
             (quasiquote-pyramid
              `(let ([ value ,(compile-binop (c-binop vop x-left x-right) 'rvalue)])
@@ -466,7 +469,8 @@ Switch Statements
 (define (compile-unop x val-ty)
   (destruct c-unop x)
   (define rvalue-exp (pyr-application (op->builtin x-op #f)
-                                      (list (compile-expression x-exp 'rvalue))))
+                                      (list (compile-expression x-exp 'rvalue))
+                                      #f))
   (define (wants-old?)
     (match x-op
       ['post++ #t]
@@ -510,9 +514,12 @@ Switch Statements
   (destruct c-function-call x)
   (match val-ty
     ['lvalue (error "compile-function-call: Function calls cannot be lvalues" x)]
-    ['rvalue (pyr-application (compile-expression x-func 'rvalue)
-                              (map (λ ([ x : c-expression ]) (compile-expression x 'rvalue))
-                                   x-args))]))
+    ['rvalue (quasiquote-pyramid
+              `(,(compile-expression x-func 'rvalue)
+                ,@(map (λ ([ x : c-expression ])
+                         (compile-expression x 'rvalue))
+                       x-args)))]
+    ))
 
 (: compile-field-access (-> c-field-access c-value-type Pyramid))
 (define (compile-field-access x val-ty)
@@ -560,7 +567,7 @@ Switch Statements
   (destruct c-expression-array x)
   (assert (equal? val-ty 'rvalue))
   (quasiquote-pyramid
-   `(%#-mem-alloc-init (%#-* (%-unbox WORD) (%-unbox ,(pyr-const (length x-exps) #t)))
+   `(%#-mem-alloc-init (%#-* %#-WORD ,(pyr-const (length x-exps) #f))
                        ,@(map (λ ([ exp : c-expression ])
                                 (compile-expression exp 'rvalue))
                               x-exps)))
@@ -573,7 +580,7 @@ Switch Statements
     (define-values (cases default) (switch-labels sw))
     (define label-after (make-label 'switch-after))
     (: jump (-> label Pyramid))
-    (define (jump lbl) (expand-pyramid `(asm (goto (label (quote ,(label-name lbl)))))))
+    (define (jump lbl) (expand-pyramid #`(asm (goto (label (quote #,(label-name lbl)))))))
     (: make-condition-entry (-> c-labeled-case Pyramid))
     (define (make-condition-entry c)
       (define cond-expr (c-labeled-case-expected c))
@@ -585,7 +592,7 @@ Switch Statements
       (append (map make-condition-entry cases)
               (list (quasiquote-pyramid `(else ,(if default
                                                     (jump (switch-default-label default))
-                                                    (expand-pyramid `(break 0))))))))
+                                                    (expand-pyramid #'(break 0))))))))
     (with-breakpoint
       (quasiquote-pyramid
        `(begin (%c-case ,(compile-expression (c-switch-actual sw) 'rvalue)
@@ -685,10 +692,10 @@ Switch Statements
   (define init (map compile-declaration x-init))
   (define post (if x-post
                    (compile-expression x-post 'rvalue)
-                   (expand-pyramid `(begin))))
+                   (expand-pyramid #'(begin))))
   (define pred (if x-pred
                    (compile-expression x-pred 'rvalue)
-                   (expand-pyramid #t)))
+                   (expand-pyramid #'#t)))
 
   (with-breakpoint
     (quasiquote-pyramid
@@ -731,19 +738,18 @@ Switch Statements
 (: compile-return      (-> c-return      Pyramid))
 (define (compile-return x)
   (destruct c-return x)
-  (quasiquote-pyramid
-   (match x-val
-     [ #f  `(return 0)]
-     [ (? c-expression? val) `(return ,(compile-expression val 'rvalue))]
-     )))
+  (match x-val
+    [ #f (quasiquote-pyramid `(return 0))]
+    [ (? c-expression? val)  (quasiquote-pyramid `(return ,(compile-expression val 'rvalue)))]
+    ))
 
 (: compile-break       (-> c-break       Pyramid))
 (define (compile-break x)
-  (expand-pyramid `(break #f)))
+  (expand-pyramid #'(break #f)))
 
 (: compile-continue    (-> c-continue    Pyramid))
 (define (compile-continue x)
-  (expand-pyramid `(continue #f)))
+  (expand-pyramid #'(continue #f)))
 
 (: compile-c-sequence (-> c-statements Pyramid))
 (define (compile-c-sequence xs)
@@ -755,7 +761,7 @@ Switch Statements
 (: compile-jump (-> Symbol Pyramid))
 (define (compile-jump x)
   (expand-pyramid
-   `(asm (goto (label (quote ,x))))))
+   #`(asm (goto (label (quote #,x))))))
 
 ;; (: make-c-label (-> Symbol c-label))
 ;; (define (make-c-label name)
@@ -763,7 +769,7 @@ Switch Statements
 
 (: with-escapepoint (-> Symbol Pyramid Pyramid))
 (define (with-escapepoint name exp)
-  (expand-pyramid `(call/cc (λ (,name) ,(shrink-pyramid exp)))))
+  (expand-pyramid #`(call/cc (λ (#,name) #,(shrink-pyramid exp)))))
 
 (: with-returnpoint (-> Pyramid Pyramid))
 (define (with-returnpoint exp)
