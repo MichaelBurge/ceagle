@@ -390,7 +390,7 @@
     )
   (define-syntax-class type-specifier
     #:attributes (specifier)
-    #:datum-literals (VOID CHAR SHORT INT LONG FLOAT DOUBLE SIGNED UNSIGNED)
+    #:datum-literals (VOID CHAR SHORT INT LONG FLOAT DOUBLE SIGNED UNSIGNED BITS)
     [pattern ((~literal type_specifier) VOID)  #:with specifier #''void]
     [pattern ((~literal type_specifier) CHAR)  #:with specifier #''char]
     [pattern ((~literal type_specifier) SHORT) #:with specifier #''short]
@@ -398,6 +398,7 @@
     [pattern ((~literal type_specifier) LONG)  #:with specifier #''long]
     [pattern ((~literal type_specifier) FLOAT) #:with specifier #''float]
     [pattern ((~literal type_specifier) DOUBLE) #:with specifier #''double]
+    [pattern ((~literal type_specifier) BITS n:integer) #:with specifier #'(c-type-fixed #f (exact-floor (/ n 8)))]
     [pattern ((~literal type_specifier) SIGNED) #:with specifier #''signed]
     [pattern ((~literal type_specifier) UNSIGNED) #:with specifier #''unsigned]
     [pattern ((~literal type_specifier) ty:struct-or-union-specifier) #:with specifier #'ty.type]
@@ -499,6 +500,11 @@
     [_ (error "decl-var->typedef: Unable to convert variable to type declaration" x)]
     ))
 
+(define (set-num-bits ty bits)
+  (match ty
+    [(struct c-type-fixed (signed? _)) (c-type-fixed signed? bits)]
+  ))
+
 (define (specifier-set-type init-ty . specifiers)
   (define (apply-specifier x ty)
     (match x
@@ -514,6 +520,7 @@
          [_ (error "specifier-set-type: Unhandle unsigned type")])]
       ['char (match ty [(struct c-type-fixed (signed? size))
                         (c-type-fixed signed? size)])]
+      [(struct c-type-fixed (_ size)) (set-num-bits ty size)]
       [(struct c-type-alias _) x]
       [(struct c-type-struct _) x]
       [(struct c-type-union _) x]

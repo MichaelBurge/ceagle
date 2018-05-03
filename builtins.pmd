@@ -4,11 +4,6 @@
 (require psl "syntax.pmd")
 (require ceagle "builtins.c")
 
-(define-syntax (__builtin_set_test_result stx)
-  (syntax-case stx ()
-    [(_ n) #'(set-test-result! n)]
-    ))
-
 (defmacro (%c-define-word-assign-unop assign-op base-op)
   `(defmacro (,assign-op x)
      `(%c-word-write! ,x (,,base-op ,x))))
@@ -64,6 +59,10 @@
 (defmacro (%c-word-op% x y)  `(%#-u% ,x ,y))
 (defmacro (%c-word-op>> x y) `(%#-bitshiftr ,x ,y))
 (defmacro (%c-word-op<< x y) `(%#-bitshiftl ,x ,y))
+(defmacro (%c-restrict-bytes x num-bytes signed?)
+  (if signed?
+      `(%#-sign-extend ,x ,num-bytes)
+      `(%#-zero-extend ,x ,num-bytes)))
 
 ; Other utilities
 
@@ -141,7 +140,26 @@
 ; Debug utilities
 
 (define (__builtin_print_word x) (%#-ioctl-print-word x))
+
+(define-syntax (%c-strip-runtime-annotations stx)
+  (syntax-case stx (%c-restrict-bytes)
+    [(_ (%c-restrict-bytes val _)) #'(%c-strip-runtime-annotations val)]
+    [(_ val) #'val]
+    ))
+
 (define-syntax (__builtin_set_max_iterations stx)
   (syntax-case stx ()
-    [(_ n) #'(%#-set-max-iterations! n)]
+    [(_ n)
+     #`(%#-set-max-iterations! #,(simplify-syntax #'(%c-strip-runtime-annotations n)))]
+    ))
+
+(define-syntax (__builtin_set_max_simulator_memory stx)
+  (syntax-case stx ()
+    [(_ n) #`(%#-set-max-simulator-memory! #,(simplify-syntax #'(%c-strip-runtime-annotations n)))]
+    ))
+
+(define-syntax (__builtin_set_test_result stx)
+  (syntax-case stx ()
+    [(_ n)
+     #`(set-test-result! #,(shrink-pyramid (simplify-macros (make-macro-application #'(%c-strip-runtime-annotations n)))))]
     ))

@@ -147,6 +147,7 @@ type_specifier
 | LONG
 | FLOAT
 | DOUBLE
+| BITS SINTEGER
 | SIGNED
 | UNSIGNED
 | struct_or_union_specifier

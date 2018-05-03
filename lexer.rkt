@@ -116,6 +116,7 @@
    ["for"      (keyword 'FOR     )]
    ["static"   (keyword 'STATIC  )]
    ["volatile" (keyword 'VOLATILE)]
+   ["__bits"   (keyword 'BITS)]
    [identifier (let ([ sym (string->symbol lexeme)])
                  (maybe-gather sym)
                  (if (set-member? *types* sym)

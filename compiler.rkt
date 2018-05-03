@@ -384,10 +384,12 @@ Switch Statements
 
 (: compile-const (-> c-const c-value-type Pyramid))
 (define (compile-const x val-ty)
-  (match val-ty
-    ['lvalue (error "compile-const: A constant cannot be an lvalue" x)]
-    ['rvalue (expand-pyramid #`(unbox #,(c-const-value x)))]
-    ))
+  (restrict-output-range
+   (expression-type x)
+   (match val-ty
+     ['lvalue (error "compile-const: A constant cannot be an lvalue" x)]
+     ['rvalue (expand-pyramid #`(unbox #,(c-const-value x)))]
+     )))
 
 (: compile-variable (-> c-variable c-value-type Pyramid))
 (define (compile-variable x val-ty)
@@ -424,38 +426,41 @@ Switch Statements
 (define (compile-binop x val-ty)
   (destruct c-binop x)
   (define vop (assign-op->value-op x-op))
-  (define (struct? _) (c-type-struct? (resolve-type (expression-type x-left))))
-  (match x-op
-    ['+ (compile-binop (c-binop 'raw+
-                                (c-binop '* x-left
-                                         (c-const (type-increment-size (expression-type x-left)) #t))
-                                (c-binop '* x-right
-                                         (c-const (type-increment-size (expression-type x-right)) #t)))
-                       'rvalue)]
-    ['- (compile-binop (c-binop 'raw-
-                                (c-binop '* x-left
-                                         (c-const (type-increment-size (expression-type x-left)) #t))
-                                (c-binop '* x-right
-                                         (c-const (type-increment-size (expression-type x-right)) #t)))
-                       'rvalue)]
-    [(and '= (? struct?)) (quasiquote-pyramid
-                           `(%#-memcpy ,(compile-expression x-left 'lvalue)
-                                       ,(compile-expression x-right 'rvalue)
-                                       ,(expand-pyramid #`(unbox #,(type-size (expression-type x-left))))))]
-    [ _
-      (let* ([ signed? (expression-signed? x) ]
-             [ rvalue-exp (quasiquote-pyramid
-                           `(,(op->builtin x-op signed?)
-                             ,(compile-expression x-left 'rvalue)
-                             ,(compile-expression x-right 'rvalue)))])
-        (if vop ; vop is only true if x-op was an assignment
-            (quasiquote-pyramid
-             `(let ([ value ,(compile-binop (c-binop vop x-left x-right) 'rvalue)])
-                (begin (%c-word-write! ,(compile-expression x-left 'lvalue)
-                                       value)
-                       value)))
-            rvalue-exp))]
-    ))
+  (define ty (resolve-type (expression-type x)))
+  (define (struct? _) (c-type-struct? ty))
+  (restrict-output-range
+   ty
+   (match x-op
+     ['+ (compile-binop (c-binop 'raw+
+                                 (c-binop '* x-left
+                                          (c-const (type-increment-size (expression-type x-left)) #t))
+                                 (c-binop '* x-right
+                                          (c-const (type-increment-size (expression-type x-right)) #t)))
+                        'rvalue)]
+     ['- (compile-binop (c-binop 'raw-
+                                 (c-binop '* x-left
+                                          (c-const (type-increment-size (expression-type x-left)) #t))
+                                 (c-binop '* x-right
+                                          (c-const (type-increment-size (expression-type x-right)) #t)))
+                        'rvalue)]
+     [(and '= (? struct?)) (quasiquote-pyramid
+                            `(%#-memcpy ,(compile-expression x-left 'lvalue)
+                                        ,(compile-expression x-right 'rvalue)
+                                        ,(expand-pyramid #`(unbox #,(type-size (expression-type x-left))))))]
+     [ _
+       (let* ([ signed? (expression-signed? x) ]
+              [ rvalue-exp (quasiquote-pyramid
+                            `(,(op->builtin x-op signed?)
+                              ,(compile-expression x-left 'rvalue)
+                              ,(compile-expression x-right 'rvalue)))])
+         (if vop ; vop is only true if x-op was an assignment
+             (quasiquote-pyramid
+              `(let ([ value ,(compile-binop (c-binop vop x-left x-right) 'rvalue)])
+                 (begin (%c-word-write! ,(compile-expression x-left 'lvalue)
+                                        value)
+                        value)))
+             rvalue-exp))]
+     )))
 
 ; x+1 on a T pointer increases the word in x by sizeof(T).
 (: type-increment-size (-> c-type Size))
@@ -478,27 +483,30 @@ Switch Statements
       ['pre++  #f]
       ['pre--  #f]
       ))
-  (match x-op
-    ['& (compile-expression x-exp 'lvalue)]
-    ['* (compile-dereference x-exp val-ty)]
-    ['- (compile-expression (c-binop '- (c-const 0 #t) x-exp) val-ty)]
-    ['+ (compile-expression x-exp val-ty)]
-    ['pre++ (compile-expression (c-binop '+= x-exp (c-const 1 #t)) val-ty)]
-    ['pre-- (compile-expression (c-binop '-= x-exp (c-const 1 #t)) val-ty)]
-    ['post++
-     (assert (equal? val-ty 'rvalue))
-     (quasiquote-pyramid
-              `(let* ([ old   ,(compile-expression x-exp 'rvalue) ])
-                 ,(compile-expression (c-binop '+= x-exp (c-const 1 #t)) 'rvalue)
-                 old))]
-    ['post--
-     (assert (equal? val-ty 'rvalue))
-     (quasiquote-pyramid
-              `(let* ([ old   ,(compile-expression x-exp 'rvalue) ])
-                 ,(compile-expression (c-binop '-= x-exp (c-const 1 #t)) 'rvalue)
-                 old))]
-    [_ rvalue-exp]
-    ))
+  (define ty (expression-type x))
+  (restrict-output-range
+   ty
+   (match x-op
+     ['& (compile-expression x-exp 'lvalue)]
+     ['* (compile-dereference x-exp val-ty)]
+     ['- (compile-expression (c-binop '- (c-const 0 #t) x-exp) val-ty)]
+     ['+ (compile-expression x-exp val-ty)]
+     ['pre++ (compile-expression (c-binop '+= x-exp (c-const 1 #t)) val-ty)]
+     ['pre-- (compile-expression (c-binop '-= x-exp (c-const 1 #t)) val-ty)]
+     ['post++
+      (assert (equal? val-ty 'rvalue))
+      (quasiquote-pyramid
+       `(let* ([ old   ,(compile-expression x-exp 'rvalue) ])
+          ,(compile-expression (c-binop '+= x-exp (c-const 1 #t)) 'rvalue)
+          old))]
+     ['post--
+      (assert (equal? val-ty 'rvalue))
+      (quasiquote-pyramid
+       `(let* ([ old   ,(compile-expression x-exp 'rvalue) ])
+          ,(compile-expression (c-binop '-= x-exp (c-const 1 #t)) 'rvalue)
+          old))]
+     [_ rvalue-exp]
+     )))
 
 (: compile-dereference (-> c-expression c-value-type Pyramid))
 (define (compile-dereference exp ty)
@@ -825,14 +833,15 @@ Switch Statements
 
 (: register-builtins! (-> Void))
 (define (register-builtins!)
-  (register-variable! '__builtin_set_test_result    (c-signature (c-type-void) (list (c-sigvar 'expected t-int))))
-  (register-variable! '__builtin_ctzll              (c-signature t-int (list (c-sigvar 'x t-int))))
-  (register-variable! '__builtin_clzll              (c-signature t-int (list (c-sigvar 'x t-int))))
-  (register-variable! '__builtin_bswap64            (c-signature t-int (list (c-sigvar 'x t-int))))
-  (register-variable! '__builtin_trap               (c-signature (c-type-void) (list (c-sigvar 'x t-int))))
+  (register-variable! '__builtin_set_test_result          (c-signature (c-type-void) (list (c-sigvar 'expected t-int))))
+  (register-variable! '__builtin_ctzll                    (c-signature t-int (list (c-sigvar 'x t-int))))
+  (register-variable! '__builtin_clzll                    (c-signature t-int (list (c-sigvar 'x t-int))))
+  (register-variable! '__builtin_bswap64                  (c-signature t-int (list (c-sigvar 'x t-int))))
+  (register-variable! '__builtin_trap                     (c-signature (c-type-void) (list (c-sigvar 'x t-int))))
 
-  (register-variable! '__builtin_print_word         (c-signature t-int (list (c-sigvar 'x t-int))))
-  (register-variable! '__builtin_set_max_iterations (c-signature t-int (list (c-sigvar 'x t-int))))
+  (register-variable! '__builtin_print_word               (c-signature t-int (list (c-sigvar 'x t-int))))
+  (register-variable! '__builtin_set_max_iterations       (c-signature t-int (list (c-sigvar 'x t-int))))
+  (register-variable! '__builtin_set_max_simulator_memory (c-signature t-int (list (c-sigvar 'x t-int))))
   )
 
 (: type-signed? (-> c-type Boolean))
@@ -847,3 +856,13 @@ Switch Statements
 (define (expression-signed? x)
   (type-signed? (expression-type x))
   )
+
+; A 64-bit integer needs to be restricted to the 64 bits after a 256-bit addition or similar is performed.
+(: restrict-output-range (-> c-type Pyramid Pyramid))
+(define (restrict-output-range ty x)
+  (match (resolve-type ty)
+    [(struct c-type-fixed (_ 32)) x]
+    [(struct c-type-fixed (signed? sz)) (make-macro-application
+                                         #`(%c-restrict-bytes #,(shrink-pyramid x) (unbox #,sz) #,signed?))]
+    [_ x]
+    ))

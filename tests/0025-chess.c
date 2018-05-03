@@ -1,7 +1,7 @@
 #lang ceagle
 
 // BEGIN C++ COMPATIBILITY
-typedef unsigned int uint64_t;
+typedef __bits 64 uint64_t;
 typedef unsigned int bool;
 
 const bool false = 0;
@@ -1486,6 +1486,7 @@ void test_ray()
 int main() {
   __builtin_set_test_result(1234);
   __builtin_set_max_iterations(1000000000);
+  __builtin_set_max_simulator_memory(20000000);
   test_ray();
   return 1234;
 }
