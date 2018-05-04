@@ -231,6 +231,19 @@ Switch Statements
   )
 (require 'typechecker)
 
+(module* test racket
+  (require rackunit)
+  (require "types.rkt")
+  (require (submod ".."))
+  (require (submod ".." typechecker))
+  (check-equal? (expression-type (c-binop '<< (c-const 1 #t) (c-const 1 #t))) t-int)
+  (check-equal? (expression-type (c-binop '<< (c-const 1 #f) (c-const 1 #t))) t-uint)
+  (parameterize ([ *variables* (make-variable-table) ])
+    (register-variable! 'f (c-signature t-uint '()))
+    (check-equal? (expression-type (c-function-call (c-variable 'f) '())) t-uint)
+    )
+  )
+
 (: *switch-counter* (Parameterof Counter))
 (define *switch-counter* (make-parameter 0))
 
@@ -388,7 +401,9 @@ Switch Statements
    (expression-type x)
    (match val-ty
      ['lvalue (error "compile-const: A constant cannot be an lvalue" x)]
-     ['rvalue (expand-pyramid #`(unbox #,(c-const-value x)))]
+     ['rvalue (if (string? (c-const-value x))
+                  (expand-pyramid #`(box   #,(c-const-value x)))
+                  (expand-pyramid #`(unbox #,(c-const-value x))))]
      )))
 
 (: compile-variable (-> c-variable c-value-type Pyramid))
@@ -840,6 +855,7 @@ Switch Statements
   (register-variable! '__builtin_trap                     (c-signature (c-type-void) (list (c-sigvar 'x t-int))))
 
   (register-variable! '__builtin_print_word               (c-signature t-int (list (c-sigvar 'x t-int))))
+  (register-variable! '__builtin_print_string             (c-signature t-int (list (c-sigvar 'x t-int))))
   (register-variable! '__builtin_set_max_iterations       (c-signature t-int (list (c-sigvar 'x t-int))))
   (register-variable! '__builtin_set_max_simulator_memory (c-signature t-int (list (c-sigvar 'x t-int))))
   )
