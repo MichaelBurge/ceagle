@@ -8,7 +8,8 @@
 
 (provide make-tokenizer
          tokenize-all
-         print-lexer-hack-state)
+         print-lexer-hack-state
+         *included-tokens*)
 
 (define-lex-abbrev identifier
   (:: (:or alphabetic "_")
@@ -23,6 +24,7 @@
 (define *gathering-type?* #f)
 (define *last-identifier* #f)
 (define *brace-level* 0)
+(define *included-tokens* (make-parameter null))
 
 (define (print-lexer-hack-state)
   (println `([ TYPES . ,*types* ]
@@ -59,6 +61,16 @@
   (lexer-src-pos
    [(eof)               eof]
    ; Preprocessor
+   [(:: "#include <" (:* (char-complement ">")) ">")
+    (let* ([ tokenize (λ (port)
+                        (read-line port)
+                        (tokenize-all port))]
+           [ new-tokens (call-with-input-file (between 10 1) tokenize)])
+      (*included-tokens* (append (*included-tokens*)
+                                 new-tokens))
+      (token 'INCLUDE_SYSTEM (between 10 1) #:skip? #t))
+    ]
+    ;(token 'INCLUDE_SYSTEM (between 10 1))]
    [(:: "#require <" (:* (char-complement ">")) ">") (token 'REQUIRE_SYSTEM (between 10 1))]
    ; Syntax regions
    [(:+ whitespace)     (token 'WHITESPACE lexeme #:skip? #t)]

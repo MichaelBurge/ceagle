@@ -34,7 +34,10 @@
     (syntax->datum (read-syntax #f in)))
 
   (define (read-syntax path port)
-    (define tokens (tokenize-all port))
+    (define tokens (parameterize ([ *included-tokens* null ])
+                     (define toks (tokenize-all port))
+                     (append (*included-tokens*)
+                             toks)))
     (verbose-section "Ceagle Tokens" VERBOSITY-MEDIUM
                      (pretty-print tokens))
     (verbose-section "Lexer Hack state" VERBOSITY-HIGH
