@@ -1,21 +1,7 @@
 #lang ceagle
 
 #include <ceagle/test-support/chess-engine.c>
-
-void assert_equal_bb(const char* message, uint64_t x, uint64_t y)
-{
-  if (x != y) {
-    // printf("ASSERTION FAILURE: %s\n", message);
-    // printf("== expected\n");
-    // print_bitboard(x);
-    // printf("== actual\n");
-    // print_bitboard(y);
-    __builtin_print_string(message);
-    __builtin_print_word(x);
-    __builtin_print_word(y);
-    __builtin_trap();
-  }
-}
+#include <ceagle/test-support/test-lib.c>
 
 void test_ray()
 {

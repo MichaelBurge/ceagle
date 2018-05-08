@@ -82,7 +82,8 @@
    [(:: (:+ numeric)  "ULL")    (token 'UINTEGER (string->number (between 0 3)))]
    [(:+ numeric)                (token 'SINTEGER (string->number lexeme))]
    [(:: "'" (char-complement "'") "'") (token 'UINTEGER (char->integer (string-ref lexeme 1)))]
-   ["'\\''"                  (token 'ONECHAR (char->integer #\'))]
+   ["'\\''"                   (token 'UINTEGER (char->integer #\'))]
+   ["'\\n'"                   (token 'UINTEGER (char->integer #\n))]
    [(:: "\""                 (:* (char-complement "\"")) "\"") (token 'STRING_LITERAL lexeme)]
    ; Punctuation
    ["{"   (begin (lbrace) lexeme )]

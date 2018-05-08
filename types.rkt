@@ -28,6 +28,9 @@
 (: t-uint c-type)
 (define t-uint (c-type-fixed #f 32))
 
+(: t-char c-type)
+(define t-char (c-type-fixed #f 1))
+
 (: t-size c-type)
 (define t-size t-uint)
 

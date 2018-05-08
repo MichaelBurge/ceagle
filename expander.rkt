@@ -41,29 +41,34 @@
     [pattern ((~literal declarator) ptr:pointer decl:direct-declarator)
              #:with name #'decl.name
              #:with sigvars #'decl.sigvars
-             #:with type-modifier #'ptr.type-modifier]
+             #:with type-modifier #'(compose ptr.type-modifier decl.type-modifier)]
     [pattern ((~literal declarator) decl:direct-declarator)
              #:with name #'decl.name
              #:with sigvars #'decl.sigvars
-             #:with type-modifier #'identity]
+             #:with type-modifier #'decl.type-modifier]
     )
   (define-syntax-class direct-declarator
-    #:attributes (name sigvars)
+    #:attributes (name sigvars type-modifier)
     [pattern ((~literal direct_declarator) name-sym:identifier)
              #:with name #'(quote name-sym)
-             #:with sigvars '()]
+             #:with sigvars '()
+             #:with type-modifier #'identity]
     [pattern ((~literal direct_declarator) decl:direct-declarator "[" (~optional constant_expression) "]")
              #:with name #'decl.name
-             #:with sigvars #'()]
+             #:with sigvars #'()
+             #:with type-modifier #'c-type-pointer]
     [pattern ((~literal direct_declarator) decl:direct-declarator "(" params:parameter-type-list ")")
              #:with name #'decl.name
-             #:with sigvars #'params.sigvars]
+             #:with sigvars #'params.sigvars
+             #:with type-modifier #'identity]
     [pattern ((~literal direct_declarator) decl:direct-declarator "(" params:identifier-list ")")
              #:with name #'(error "Parsing direct-declarator: Unhandled nameless variable")
-             #:with sigvars #'(error "Parsing direct-declarator: Unhandled nameless variable")]
+             #:with sigvars #'(error "Parsing direct-declarator: Unhandled nameless variable")
+             #:with type-modifier #'(error "Parsing direct-declarator: Unhandled nameless variable")]
     [pattern ((~literal direct_declarator) decl:direct-declarator "(" ")")
              #:with name #'decl.name
-             #:with sigvars #''()]
+             #:with sigvars #''()
+             #:with type-modifier #'identity]
     )
 
   (define-syntax-class identifier-list

@@ -141,6 +141,7 @@
 
 (define (__builtin_print_word x) (%#-ioctl-print-word x))
 (define (__builtin_print_string x) (%#-ioctl-print-string x))
+(define (__builtin_print_char x) (%#-ioctl-print-char x))
 
 (define-syntax (%c-strip-runtime-annotations stx)
   (syntax-case stx (%c-restrict-bytes)

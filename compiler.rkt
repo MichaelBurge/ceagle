@@ -77,22 +77,6 @@ Switch Statements
     (maybe-register-type! ty)
     (hash-set! (*variables*) name ty))
 
-  (: with-function-scope (All (A) (-> c-signature (-> A) A)))
-  (define (with-function-scope sig f)
-    (parameterize ([ *variables* (hash-copy (*variables*))])
-      (hash-union! (*variables*)
-                   (signature->variable-table sig)
-                   #:combine/key (λ ([ k : Symbol ] [v0 : c-type] [v : c-type]) v))
-      (f)))
-
-  (: signature->variable-table (-> c-signature variable-table))
-  (define (signature->variable-table sig)
-    (destruct c-signature sig)
-    (define ret (make-variable-table))
-    (for ([ sv sig-args ])
-      (hash-set! ret (c-sigvar-name sv) (c-sigvar-type sv)))
-    ret)
-
   (: typespace-registry (-> c-typespace TypeRegistry))
   (define (typespace-registry ty)
     (match ty
@@ -100,6 +84,10 @@ Switch Statements
       ['struct (*struct-registry*)]
       ['union  (*union-registry*)]
       ))
+
+  (define-syntax-rule (declare-variable-scope xs ...)
+    (parameterize ([ *variables* (hash-copy (*variables*)) ])
+      xs ...))
 
   ; register-type! handles typedefs. This handles "struct x { } => struct x;" associations.
   (: maybe-register-type! (-> c-type Void))
@@ -210,17 +198,23 @@ Switch Statements
   (define (pointer-expression? x)
     (c-type-pointer? (expression-type x)))
 
+  ; Size in bytes of the type
   (: type-size (-> c-type Size))
   (define (type-size x)
     (match (resolve-type x)
-      [(struct c-type-fixed (_ bytes)) bytes]
+      [(struct c-type-fixed (_ bytes)) 32 ];bytes]
       [(struct c-type-struct (_ fields)) (for/sum : Size ([ field fields ])
                                            (type-size (c-type-struct-field-type field)))]
       [(struct c-signature _) 32]
       [(struct c-type-pointer _) 32]
       [(struct c-type-union (_ fields)) (fields-max-size fields)]
       [(struct c-signature _) 32 ]
-      [_ (error "type-size: Unknown case" x)]))
+      [_ (error "type-size: Unknown case" x)]
+      ))
+
+  (: pad-size (-> Size Size))
+  (define (pad-size x)
+    (+ x (modulo x 32)))
 
   (: fields-max-size (-> c-type-struct-fields Size))
   (define (fields-max-size fields)
@@ -322,16 +316,18 @@ Switch Statements
   (: vars VariableNames)
   (define vars (map sigvar-init x-sig-args))
   (register-variable! x-name x-sig)
-  (with-function-scope x-sig
-    (λ ()
-      (pyr-definition x-name
-                      (pyr-lambda vars
-                                  (quasiquote-pyramid
-                                   `(begin ,@(for/list : Pyramids ([ arg x-sig-args ])
-                                               (expand-pyramid
-                                                (unsafe-cast #`(%c-define-arg #,(c-sigvar-name arg) #,(sigvar-init arg)))))
-                                           ,(with-returnpoint
-                                              (compile-statement x-body)))))))))
+  (declare-variable-scope
+   (define args (for/list : Pyramids ([ arg x-sig-args ])
+                  (define arg-name (c-sigvar-name arg))
+                  (define arg-type (c-sigvar-type arg))
+                  (register-variable! arg-name arg-type)
+                  (make-macro-application #`(#,(variable-definer arg-type) #,arg-name #,(sigvar-init arg)))))
+   (pyr-definition x-name
+                   (pyr-lambda vars
+                               (quasiquote-pyramid
+                                `(begin ,@args
+                                        ,(with-returnpoint
+                                           (compile-statement x-body))))))))
 
 (: compile-statement (-> c-statement Pyramid))
 (define (compile-statement x)
@@ -756,7 +752,11 @@ Switch Statements
 
 (: compile-block       (-> c-block       Pyramid))
 (define (compile-block x)
-  (compile-c-sequence (c-block-body x)))
+  ; TODO: This likely doesn't handle gotos between blocks, since the lambda creates a new continuation frame.
+  (quasiquote-pyramid
+   `((λ ()
+       ,(compile-c-sequence (c-block-body x))
+       ))))
 
 (: compile-return      (-> c-return      Pyramid))
 (define (compile-return x)
@@ -854,8 +854,9 @@ Switch Statements
   (register-variable! '__builtin_bswap64                  (c-signature t-int (list (c-sigvar 'x t-int))))
   (register-variable! '__builtin_trap                     (c-signature (c-type-void) (list (c-sigvar 'x t-int))))
 
-  (register-variable! '__builtin_print_word               (c-signature t-int (list (c-sigvar 'x t-int))))
-  (register-variable! '__builtin_print_string             (c-signature t-int (list (c-sigvar 'x t-int))))
+  (register-variable! '__builtin_print_word               (c-signature (c-type-void) (list (c-sigvar 'x t-int))))
+  (register-variable! '__builtin_print_string             (c-signature (c-type-void) (list (c-sigvar 'x t-int))))
+  (register-variable! '__builtin_print_char               (c-signature (c-type-void) (list (c-sigvar 'x t-char))))
   (register-variable! '__builtin_set_max_iterations       (c-signature t-int (list (c-sigvar 'x t-int))))
   (register-variable! '__builtin_set_max_simulator_memory (c-signature t-int (list (c-sigvar 'x t-int))))
   )

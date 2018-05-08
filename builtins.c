@@ -2,7 +2,7 @@
 
 // https://github.com/nemequ/portable-snippets/blob/master/builtin/builtin.h
 
-typedef unsigned int psnip_uint64_t;
+typedef unsigned __bits 64 psnip_uint64_t;
 
 psnip_uint64_t psnip_builtin_bswap64(psnip_uint64_t v) {
   return
@@ -31,6 +31,7 @@ int psnip_builtin_ctz64(psnip_uint64_t v) {
 int psnip_builtin_clz64( psnip_uint64_t x )
 {
   if (x == 0) return 64;
-  for (int n = 0; ((x & 0x8000000000000000) == 0); n++, x <<= 1);
+  int n = 0;
+  for (int m; ((x & 0x8000000000000000) == 0); n++, x <<= 1);
   return n;
 }
