@@ -1,4 +1,4 @@
-#lang pyramid/core
+#lang pyramid
 
 (require psl "primitives.pmd")
 (require psl "syntax.pmd")
@@ -25,14 +25,14 @@
 (%c-define-word-assign-binop %c-word-op/= '%c-word-op/)
 (%c-define-word-assign-binop %c-word-op=  '%c-word-opright)
 
-(defmacro (%c-word-op-1 x)  `(%#-- ,x 1))
-(defmacro (%c-word-op+1 x)  `(%#-+ ,x 1))
+(defmacro (%c-word-op-1 x)  `(%#-- ,x (unbox 1)))
+(defmacro (%c-word-op+1 x)  `(%#-+ ,x (unbox 1)))
 (defmacro (%c-word-opdereference x) `(%c-word-read ,x))
 (defmacro (%c-word-op! x)   `(%#-not ,x))
 (defmacro (%c-word-op~ x)   `(%#-negate ,x))
 
-(defmacro (%c-word-op&& x y)   `(%#-not (%#-not (%#-and ,x ,y))))
-(defmacro (%c-word-op\|\| x y) `(%#-not (%#-not (%#-or ,x ,y))))
+(defmacro (%c-word-op&& x y)   `(%#-not (%#-not (%#-and (%#-not (%#-not ,x)) (%#-not (%#-not ,y))))))
+(defmacro (%c-word-op\|\| x y) `(%#-not (%#-not (%#-or (%#-not (%#-not ,x)) (%#-not (%#-not ,y))))))
 (defmacro (%c-word-op& x y)    `(%#-and ,x ,y))
 (defmacro (%c-word-op\| x y)   `(%#-or  ,x ,y))
 (defmacro (%c-word-op^ x y)    `(%#-xor ,x ,y))
